@@ -1,0 +1,4 @@
+data/
+*.pkl
+node_modules/
+.env
