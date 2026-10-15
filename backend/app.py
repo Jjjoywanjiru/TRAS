@@ -289,52 +289,47 @@ def decide_allocation(alloc_id):
 
 
 @app.patch("/triage/<int:record_id>/outcome")
-def record_outcome(record_id):
-    """
-    Nurse in Charge logs the final patient outcome, which releases their room.
-    """
-    data = request.get_json(silent=True)
-    outcome = data.get("outcome")
-
-    if not outcome:
-        return jsonify(error="'outcome' is required."), 400
-
-    outcome = outcome.lower()
-    if outcome not in ["admitted", "discharged", "transferred"]:
-        return jsonify(error="Invalid outcome type."), 400
-
+def log_outcome(record_id):
+    """Logs the final outcome, archives the allocation, and frees the room."""
     try:
-        # 1. Update the Triage Record with the final outcome
-        triage_update = {
+        data = request.json
+        outcome = data.get("outcome") # 'admitted', 'discharged', or 'transferred'
+        
+        # 1. Update the triage record with the final outcome
+        supabase.table("triage_record").update({
             "outcome": outcome,
             "outcome_at": datetime.now(timezone.utc).isoformat()
-        }
-        triage_res = supabase.table("triage_record").update(triage_update).eq("id", record_id).execute()
-
-        if not triage_res.data:
-            return jsonify(error="Triage record not found."), 404
-
-        # 2. Find the room this patient was occupying and free it
-        alloc_res = supabase.table("allocation") \
-            .select("room_id") \
-            .eq("triage_record_id", record_id) \
-            .in_("decision", ["confirmed", "modified"]) \
-            .execute()
+        }).eq("id", record_id).execute()
         
-        freed_room_id = None
+        # 2. Find the active allocation for this patient
+        alloc_res = supabase.table("allocation").select("*").eq("triage_record_id", record_id).execute()
+        
         if alloc_res.data:
-            freed_room_id = alloc_res.data[0]["room_id"]
-            supabase.table("room").update({"status": "free"}).eq("id", freed_room_id).execute()
+            for alloc in alloc_res.data:
+                # 3. Free up the room
+                supabase.table("room").update({
+                    "status": "free"
+                }).eq("id", alloc["room_id"]).execute()
+                
+                supabase.table("allocation").delete().eq("id", alloc["id"]).execute()
 
-        return jsonify({
-            "message": f"Patient {outcome}, room released.",
-            "triage_record": triage_res.data[0],
-            "freed_room_id": freed_room_id
-        }), 200
-
+        return jsonify({"message": f"Patient successfully {outcome}. Room is now available."}), 200
+        
     except Exception as e:
         return jsonify(error=str(e)), 500
 
+@app.get("/allocations")
+def get_allocations():
+    """Fetches active allocations for the Nurse in Charge."""
+    try:
+        # Fetch allocations that are pending or confirmed, joining the related triage and room data
+        result = supabase.table("allocation") \
+            .select("*, triage_record(*, patient(*)), room(*)") \
+            .in_("decision", ["pending", "confirmed", "modified"]) \
+            .execute()
+        return jsonify(result.data), 200
+    except Exception as e:
+        return jsonify(error=str(e)), 500
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
