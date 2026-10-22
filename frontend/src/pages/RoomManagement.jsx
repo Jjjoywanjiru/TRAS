@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import axios from '../api';
 
 const API = 'http://127.0.0.1:5000';
 const NURSE_ID = '9d898aa0-e87e-4f4d-8d0c-558c4895a506'; // dummy until login is built

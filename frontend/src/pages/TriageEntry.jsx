@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import axios from 'axios';
+import axios from '../api';
 
 const NUMERIC = ['token_number', 'sex', 'age', 'arrival_mode', 'injury', 'mental',
   'nrs_pain', 'sbp', 'dbp', 'hr', 'rr', 'bt', 'saturation'];

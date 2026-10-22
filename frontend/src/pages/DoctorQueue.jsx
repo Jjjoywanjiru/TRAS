@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import axios from '../api';
 
 export default function DoctorQueue() {
   const [queue, setQueue] = useState([]);

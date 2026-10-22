@@ -3,7 +3,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 
 # Make ml/triage_model.py importable
@@ -12,6 +12,8 @@ from triage_model import predict_patient
 
 # Import Supabase client
 from db import supabase
+from auth import (login_required, roles_required,
+                  ROLE_TRIAGE_NURSE, ROLE_DOCTOR, ROLE_NURSE_IN_CHARGE)
 
 app = Flask(__name__)
 CORS(app)  
@@ -86,7 +88,15 @@ def health():
     return jsonify(status="ok")
 
 
+@app.get("/me")
+@login_required
+def me():
+    """Who is signed in? The React app uses this to pick the right screens."""
+    return jsonify(g.user), 200
+
+
 @app.get("/rooms")
+@login_required
 def get_rooms():
     """Fetch all rooms for the Nurse in Charge dashboard."""
     try:
@@ -97,15 +107,15 @@ def get_rooms():
 
 
 @app.post("/triage")
+@roles_required(ROLE_TRIAGE_NURSE)
 def create_triage():
     """Predicts severity, creates/fetches the patient, and stores the triage record."""
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(error="Send a JSON body."), 400
 
-    # Ensure recorded_by (Triage Nurse UUID) and patient_code are provided
-    if not data.get("recorded_by") or not data.get("patient_code") or data.get("token_number") in (None, ""):
-        return jsonify(error="Missing required identifiers: 'recorded_by', 'patient_code' and 'token_number'."), 400
+    if not data.get("patient_code") or data.get("token_number") in (None, ""):
+        return jsonify(error="Missing required identifiers: 'patient_code' and 'token_number'."), 400
 
     missing = [f for f in REQUIRED if data.get(f) in (None, "")]
     if missing:
@@ -137,7 +147,7 @@ def create_triage():
         #Insert the Triage Record mapping to the SQL schema
         triage_payload = {
             "patient_id": patient_id,
-            "recorded_by": data.get("recorded_by"),
+            "recorded_by": g.user["id"],  # the signed-in nurse, taken from the token
             "token_number": data.get("token_number"),
             "systolic_bp": data.get("sbp"),
             "diastolic_bp": data.get("dbp"),
@@ -169,6 +179,7 @@ def create_triage():
 
 
 @app.get("/queue")
+@login_required
 def get_doctor_queue():
     """Fetches patients waiting for doctor review, prioritised by severity then wait time."""
     try:
@@ -187,6 +198,7 @@ def get_doctor_queue():
 
 
 @app.patch("/triage/<int:record_id>/review")
+@roles_required(ROLE_DOCTOR)
 def review_triage(record_id):
     """Allows the Doctor to accept or override the predicted severity and triggers allocation."""
     data = request.get_json(silent=True)
@@ -195,10 +207,10 @@ def review_triage(record_id):
 
     final_severity = data.get("final_severity")
     override_reason = data.get("override_reason")
-    doctor_id = data.get("doctor_id")
+    doctor_id = g.user["id"]  # the signed-in doctor, taken from the token
 
-    if not final_severity or not doctor_id:
-        return jsonify(error="'final_severity' and 'doctor_id' are required."), 400
+    if not final_severity:
+        return jsonify(error="'final_severity' is required."), 400
 
     if final_severity.lower() not in ("critical", "urgent", "stable"):
         return jsonify(error="'final_severity' must be critical, urgent or stable."), 400
@@ -241,6 +253,7 @@ def review_triage(record_id):
 
 
 @app.patch("/allocation/<int:alloc_id>/decide")
+@roles_required(ROLE_NURSE_IN_CHARGE)
 def decide_allocation(alloc_id):
     """
     Nurse in Charge confirms, modifies, or rejects the recommended room.
@@ -252,10 +265,10 @@ def decide_allocation(alloc_id):
         return jsonify(error="Send a JSON body."), 400
 
     decision = (data.get("decision") or "").lower()
-    nurse_id = data.get("nurse_id")
+    nurse_id = g.user["id"]  # the signed-in Nurse in Charge, taken from the token
 
-    if not decision or not nurse_id:
-        return jsonify(error="'decision' and 'nurse_id' are required."), 400
+    if not decision:
+        return jsonify(error="'decision' is required."), 400
     if decision not in ["confirmed", "modified", "rejected"]:
         return jsonify(error="Invalid decision type."), 400
 
@@ -321,6 +334,7 @@ def decide_allocation(alloc_id):
 
 
 @app.patch("/triage/<int:record_id>/outcome")
+@roles_required(ROLE_NURSE_IN_CHARGE)
 def log_outcome(record_id):
     """Logs the final outcome and frees the room. Allocation history is kept."""
     data = request.get_json(silent=True)
@@ -353,6 +367,7 @@ def log_outcome(record_id):
 
 
 @app.get("/allocations")
+@login_required
 def get_allocations():
     """Active allocations for the Nurse in Charge (patients with an outcome are hidden)."""
     try:
@@ -368,6 +383,7 @@ def get_allocations():
 
 
 @app.get("/awaiting-room")
+@login_required
 def get_awaiting_room():
     """Reviewed patients with no outcome and no active room (e.g. the ED was full)."""
     try:
@@ -383,6 +399,7 @@ def get_awaiting_room():
 
 
 @app.post("/triage/<int:record_id>/recommend-room")
+@roles_required(ROLE_NURSE_IN_CHARGE)
 def recommend_for_waiting(record_id):
     """Try again to find a room for a reviewed patient who is still waiting for one."""
     try:
