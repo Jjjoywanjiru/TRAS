@@ -2,10 +2,10 @@ import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-ro
 import TriageEntry from './pages/TriageEntry';
 import DoctorQueue from './pages/DoctorQueue'; 
 import RoomManagement from './pages/RoomManagement';
+import OperationsBoard from './pages/OperationsBoard';
 
 // Placeholders for the remaining screens
 const Login = () => <div>Login Screen</div>;
-const OperationsBoard = () => <div>Real-Time Operations Board</div>;
 
 
 function App() {

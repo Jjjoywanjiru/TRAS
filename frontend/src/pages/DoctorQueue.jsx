@@ -15,7 +15,6 @@ export default function DoctorQueue() {
       setLoading(true);
       try {
         const response = await axios.get('http://127.0.0.1:5000/queue');
-        console.log("Fetched queue data:", response.data); // <-- This will show us what is wrong
         
         // Ensure we always have an array, even if the database returns null
         if (Array.isArray(response.data)) {
@@ -78,7 +77,28 @@ export default function DoctorQueue() {
                 Vitals: HR {record.heart_rate}, BP {record.systolic_bp}/{record.diastolic_bp}, SpO2 {record.spo2}%
                 <br />
                 Wait Time: {Math.round((new Date() - new Date(record.created_at)) / 60000)} mins
+                <br />
+                Complaint: {record.chief_complaint}
               </div>
+
+              {record.top_features?.reasons && (
+                <div style={{ fontSize: '0.85rem', backgroundColor: '#f7fafc', padding: '10px', borderRadius: '4px', marginBottom: '15px' }}>
+                  <strong>Why the model said {record.predicted_severity}</strong>
+                  {record.top_features.confidence != null && (
+                    <span> ({Math.round(record.top_features.confidence * 100)}% confident)</span>
+                  )}
+                  <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+                    {record.top_features.reasons.map((r, i) => (
+                      <li key={i}>
+                        {r.text}{' '}
+                        <span style={{ color: r.direction === 'toward' ? '#c53030' : '#2f855a' }}>
+                          ({r.direction === 'toward' ? 'raises' : 'lowers'} the predicted severity)
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {reviewingId === record.id ? (
                 <form onSubmit={(e) => handleReviewSubmit(e, record.id)} style={{ backgroundColor: '#f7fafc', padding: '10px', borderRadius: '4px' }}>

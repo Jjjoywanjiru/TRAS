@@ -31,9 +31,9 @@ RULES = [
     ("unreadable", r"^[?\s]+$"),
 ]
 
-BASE_COLS = ["Sex", "Age", "Arrival mode", "Injury", "Mental", "Pain",
-             "NRS_pain", "SBP", "DBP", "HR", "RR", "BT", "Saturation"]
+BASE_COLS = ["Sex", "Age", "Arrival mode", "Injury", "Mental", "Pain","NRS_pain", "SBP", "DBP", "HR", "RR", "BT", "Saturation"]
 
+#loading models
 _model = xgb.XGBClassifier()
 _model.load_model(MODEL_DIR / "severity_model.json")
 with open(MODEL_DIR / "feature_columns.json") as f:
@@ -47,7 +47,7 @@ def group_complaint(text):
             return name
     return "other"
 
-
+#reasons
 def _describe(feature, value):
     if feature.startswith("cc_"):
         group = feature[3:].replace("_", " ")
@@ -58,10 +58,10 @@ def _describe(feature, value):
 
 
 def predict_patient(patient, top=4):
-    """patient: dict with the dataset's field names (see BASE_COLS) plus
+    """patient: dict with the dataset's field names  plus
     'Chief_complain'. Missing vitals can be None."""
     row = {c: np.nan if patient.get(c) is None else float(patient[c]) for c in BASE_COLS}
-    if row["Pain"] == 0:                      # same rule as the cleaning notebook
+    if row["Pain"] == 0:                      
         row["NRS_pain"] = 0.0
 
     X = pd.DataFrame(0.0, index=[0], columns=_columns)
@@ -83,6 +83,7 @@ def predict_patient(patient, top=4):
         for f, s in strongest.items()
     ]
     return {
+        #return the predicted tier, confidence, probabilities for each tier, complaint group, and reasons for the prediction
         "tier": TIERS[pred],
         "confidence": round(float(probs[pred]), 3),
         "probabilities": {t: round(float(p), 3) for t, p in zip(TIERS, probs)},
