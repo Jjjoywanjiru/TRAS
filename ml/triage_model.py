@@ -18,15 +18,15 @@ TIERS = ["Critical", "Urgent", "Stable"]   # model outputs 0, 1, 2
 
 # Chief-complaint grouping. First matching rule wins, so keep the order.
 RULES = [
-    ("chest_pain", r"chest|palpitation|angina"),
+    ("chest_pain", r"chest|palpitation|angina|heart ?burn|heart (racing|pain|attack)|racing heart"),
     ("abdominal_pain", r"abd|epigast|stomach|flank|rlq|llq|ruq|luq|groin"),
-    ("breathing", r"dyspnea|dyspnoea|shortness|sob|cough|breath|wheez|hemoptysis"),
-    ("neuro", r"dizz|vertigo|mental|conscious|syncope|seizure|convuls|dysarthria|weakness|palsy|paresis|hemipar|loc$|^loc|amnesia|blurred|vision|numb|stroke|paralys|aphasia|confus|drows"),
+    ("breathing", r"dyspn|shortness|\bsob\b|short of breath|can'?t breathe|cannot breathe|difficulty breathing|difficult breathing|cough|breath|wheez|hemoptysis"),
+    ("neuro", r"dizz|vertigo|mental|conscious|syncope|seizure|convuls|\bfits?\b|dysarthria|weakness|palsy|paresis|hemipar|\bloc\b|amnesia|blurred|vision|numb|stroke|paralys|aphasia|confus|drows|faint|passed out|collaps"),
     ("fever", r"fever|chill"),
-    ("skin_ent_urinary_psych", r"rash|urticar|itch|epistaxis|nose|throat|ear|dysuria|urin|void|hematuria|anxiety|suicid|psych|agitat|violence|myalgia|cpr|ascites|catheter"),
+    ("skin_ent_urinary_psych", r"rash|urticar|itch|epistaxis|\bnose|throat|\bears?\b|earache|hearing|dysuria|urin|\bvoid|hematuria|anxiety|suicid|psych|agitat|violence|myalgia|\bcpr\b|ascites|catheter"),
     ("headache", r"headache|head ache|^ha$"),
     ("bleeding_gi", r"hematem|melena|hematochezia|bloody|bleed|vomit|diarrh|nausea|constipat"),
-    ("injury_wound", r"wound|laceration|injur|trauma|fall|fracture|burn|bite|contusion|sprain|swelling|cut|abrasion"),
+    ("injury_wound", r"wound|laceration|injur|trauma|\bfall|fracture|burn|\bbite|contusion|sprain|swelling|\bcut\b|abrasion|accident"),
     ("pain_other", r"pain|ache"),
     ("unreadable", r"^[?\s]+$"),
 ]
