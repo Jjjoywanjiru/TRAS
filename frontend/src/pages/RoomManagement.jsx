@@ -2,14 +2,13 @@ import { useState, useEffect } from 'react';
 import api from '../api';
 
 const POLL_MS = 8000;
-
-const btn = (bg) => ({ padding: '8px 12px', backgroundColor: bg, color: 'white', border: 'none', cursor: 'pointer', borderRadius: '4px' });
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
 
 export default function RoomManagement() {
   const [board, setBoard] = useState({ rooms: [], awaiting: [], allocations: [] });
   const [chosenRoom, setChosenRoom] = useState({}); // allocation id -> room id picked in the dropdown
   const [loading, setLoading] = useState(true);     // only true for the first load, so the page never blanks
-  const [notice, setNotice] = useState(null);       // { type: 'ok' | 'error', text }
+  const [notice, setNotice] = useState(null);       // { type: 'ok' | 'err' | 'warn', text }
   const [busyKey, setBusyKey] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -22,7 +21,7 @@ export default function RoomManagement() {
         if (active) setBoard(res.data);
       } catch (err) {
         console.error(err);
-        if (active) setNotice({ type: 'error', text: 'Cannot reach the server. Showing the last data received.' });
+        if (active) setNotice({ type: 'warn', text: 'Cannot reach the server. Showing the last data received.' });
       } finally {
         if (active) setLoading(false);
       }
@@ -39,7 +38,7 @@ export default function RoomManagement() {
       setNotice({ type: 'ok', text: res.data?.message || okText });
     } catch (err) {
       console.error(err);
-      setNotice({ type: 'error', text: err.response?.data?.error || 'Cannot reach the server. Nothing was changed; please try again.' });
+      setNotice({ type: 'err', text: err.response?.data?.error || 'Cannot reach the server. Nothing was changed; please try again.' });
     } finally {
       setBusyKey(null);
       setRefreshKey((k) => k + 1);
@@ -50,33 +49,33 @@ export default function RoomManagement() {
     act(`a${alloc.id}`, () => api.patch(`/allocation/${alloc.id}/decide`, {
       decision,
       ...(decision === 'modified' ? { new_room_id: Number(newRoomId) } : {}),
-    }), 'Done.');
+    }), 'Saved.');
 
   const outcome = (alloc, value) =>
-    act(`a${alloc.id}`, () => api.patch(`/triage/${alloc.triage_record_id}/outcome`, { outcome: value }), 'Done.');
+    act(`a${alloc.id}`, () => api.patch(`/triage/${alloc.triage_record_id}/outcome`, { outcome: value }), 'Saved.');
 
   const findRoom = (rec) =>
-    act(`w${rec.id}`, () => api.post(`/triage/${rec.id}/recommend-room`), 'Done.');
+    act(`w${rec.id}`, () => api.post(`/triage/${rec.id}/recommend-room`), 'Saved.');
 
-  if (loading) return <div>Loading allocations...</div>;
+  if (loading) return <div className="page">Loading rooms...</div>;
 
   const { rooms, awaiting, allocations } = board;
   const freeRooms = rooms.filter((r) => r.status === 'free');
 
-  const roomPicker = (alloc, label) => (
-    <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+  const roomPicker = (alloc, placeholder) => (
+    <div className="picker">
       <select
+        aria-label={placeholder}
         value={chosenRoom[alloc.id] || ''}
         onChange={(e) => setChosenRoom({ ...chosenRoom, [alloc.id]: e.target.value })}
-        style={{ flex: 1, padding: '6px' }}
       >
-        <option value="">{label}</option>
+        <option value="">{placeholder}</option>
         {freeRooms.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.room_type})</option>)}
       </select>
       <button
+        className="btn"
         disabled={!chosenRoom[alloc.id] || busyKey === `a${alloc.id}`}
         onClick={() => decide(alloc, 'modified', chosenRoom[alloc.id])}
-        style={{ ...btn('#805ad5'), opacity: chosenRoom[alloc.id] ? 1 : 0.5 }}
       >
         Use this room
       </button>
@@ -84,89 +83,80 @@ export default function RoomManagement() {
   );
 
   return (
-    <div style={{ maxWidth: '1000px', margin: '0 auto', fontFamily: 'sans-serif' }}>
-      <h2>Room Management (Nurse in Charge)</h2>
+    <div className="page">
+      <div className="page-head">
+        <h1>Room management</h1>
+        <p>
+          {freeRooms.length} free {freeRooms.length === 1 ? 'room' : 'rooms'}
+          {freeRooms.length > 0 && <>: {freeRooms.map((r) => r.name).join(', ')}</>}
+        </p>
+      </div>
 
-      {notice && (
-        <div style={{
-          padding: '10px', marginBottom: '15px',
-          backgroundColor: notice.type === 'ok' ? '#e6fffa' : '#fff5f5',
-          border: `1px solid ${notice.type === 'ok' ? '#319795' : '#e53e3e'}`,
-        }}>
-          {notice.text}
-        </div>
-      )}
-
-      <p style={{ color: '#4a5568' }}>
-        Free rooms right now: <strong>{freeRooms.length}</strong>
-        {freeRooms.length > 0 && <> ({freeRooms.map((r) => r.name).join(', ')})</>}
-      </p>
+      {notice && <div className={`notice ${notice.type}`}>{notice.text}</div>}
 
       {awaiting.length > 0 && (
-        <div style={{ marginBottom: '25px' }}>
-          <h3>Waiting for a room ({awaiting.length})</h3>
+        <section style={{ marginBottom: '28px' }}>
+          <h2 style={{ marginBottom: '12px' }}>Waiting for a room ({awaiting.length})</h2>
           {awaiting.map((rec) => (
-            <div key={rec.id} style={{ border: '2px solid #e53e3e', borderRadius: '8px', padding: '12px', marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div key={rec.id} className="waiting-row">
               <span>
-                <strong>{rec.patient?.patient_code}</strong> (token {rec.token_number}) &mdash;{' '}
-                <span style={{ textTransform: 'uppercase' }}>{rec.final_severity}</span>
+                <strong>{rec.patient?.patient_code}</strong> <span className="muted">token {rec.token_number}</span>{' '}
+                <span className={`tier tier-${rec.final_severity}`}>{cap(rec.final_severity)}</span>
               </span>
-              <button disabled={busyKey === `w${rec.id}`} onClick={() => findRoom(rec)} style={btn('#2b6cb0')}>
+              <button className="btn btn-primary" disabled={busyKey === `w${rec.id}`} onClick={() => findRoom(rec)}>
                 {busyKey === `w${rec.id}` ? 'Looking...' : 'Find a room'}
               </button>
             </div>
           ))}
-        </div>
+        </section>
       )}
 
-      <h3>Room allocations</h3>
+      <h2 style={{ marginBottom: '12px' }}>Room allocations</h2>
       {allocations.length === 0 ? (
-        <p>No active room allocations.</p>
+        <p className="muted">No patients are in rooms. Rooms appear here when a doctor confirms a patient.</p>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+        <div className="alloc-grid">
           {allocations.map((alloc) => {
             const busy = busyKey === `a${alloc.id}`;
             const pending = alloc.decision === 'pending';
+            const sev = alloc.triage_record?.final_severity;
             return (
-              <div key={alloc.id} style={{
-                border: pending ? '2px solid #ed8936' : '1px solid #cbd5e0',
-                padding: '15px', borderRadius: '8px'
-              }}>
-                <h3 style={{ marginTop: 0 }}>
-                  {alloc.room?.name} <span style={{ fontSize: '0.9rem', fontWeight: 'normal', color: '#718096' }}>({alloc.room?.room_type})</span>
+              <article key={alloc.id} className={pending ? 'alloc pending' : 'alloc'}>
+                <h3>
+                  {alloc.room?.name} <span className="muted" style={{ fontWeight: 400 }}>({alloc.room?.room_type})</span>
                 </h3>
-
-                <div style={{ marginBottom: '15px', fontSize: '0.95rem' }}>
-                  <strong>Patient:</strong> {alloc.triage_record?.patient?.patient_code} <br />
-                  <strong>Severity:</strong> <span style={{ textTransform: 'uppercase' }}>{alloc.triage_record?.final_severity}</span><br />
-                  <strong>Status:</strong> {alloc.decision.toUpperCase()}
-                  {alloc.auto_assigned && (
-                    <span style={{ marginLeft: '8px', fontSize: '0.8rem', backgroundColor: '#fed7d7', padding: '2px 6px', borderRadius: '4px' }}>
-                      Assigned automatically (Critical)
-                    </span>
-                  )}
-                </div>
+                <dl>
+                  <dt>Patient</dt>
+                  <dd>{alloc.triage_record?.patient?.patient_code}</dd>
+                  <dt>Severity</dt>
+                  <dd><span className={`tier tier-${sev}`}>{cap(sev)}</span></dd>
+                  <dt>Status</dt>
+                  <dd>
+                    {pending ? 'Waiting for your decision' : cap(alloc.decision)}
+                    {alloc.auto_assigned && <span className="auto">Assigned automatically (Critical)</span>}
+                  </dd>
+                </dl>
 
                 {pending ? (
                   <div>
-                    <div style={{ display: 'flex', gap: '10px' }}>
-                      <button disabled={busy} onClick={() => decide(alloc, 'confirmed')} style={btn('#38a169')}>Confirm Room</button>
-                      <button disabled={busy} onClick={() => decide(alloc, 'rejected')} style={btn('#e53e3e')}>Reject</button>
+                    <div className="btn-row">
+                      <button className="btn btn-stable" disabled={busy} onClick={() => decide(alloc, 'confirmed')}>Confirm room</button>
+                      <button className="btn btn-danger-outline" disabled={busy} onClick={() => decide(alloc, 'rejected')}>Reject</button>
                     </div>
-                    {roomPicker(alloc, '-- Choose a different room --')}
+                    {roomPicker(alloc, 'Choose a different room')}
                   </div>
                 ) : (
-                  <div style={{ padding: '10px', backgroundColor: '#f7fafc', borderRadius: '4px' }}>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', fontWeight: 'bold' }}>Record Patient Outcome to Free Room:</label>
-                    <div style={{ display: 'flex', gap: '5px' }}>
-                      <button disabled={busy} onClick={() => outcome(alloc, 'admitted')} style={btn('#2b6cb0')}>Admit</button>
-                      <button disabled={busy} onClick={() => outcome(alloc, 'discharged')} style={btn('#718096')}>Discharge</button>
-                      <button disabled={busy} onClick={() => outcome(alloc, 'transferred')} style={btn('#d69e2e')}>Transfer</button>
+                  <div className="outcome">
+                    <p>Record the outcome to free this room</p>
+                    <div className="btn-row">
+                      <button className="btn btn-primary btn-small" disabled={busy} onClick={() => outcome(alloc, 'admitted')}>Admit</button>
+                      <button className="btn btn-small" disabled={busy} onClick={() => outcome(alloc, 'discharged')}>Discharge</button>
+                      <button className="btn btn-small" disabled={busy} onClick={() => outcome(alloc, 'transferred')}>Transfer</button>
                     </div>
-                    {roomPicker(alloc, '-- Move to another room --')}
+                    {roomPicker(alloc, 'Move to another room')}
                   </div>
                 )}
-              </div>
+              </article>
             );
           })}
         </div>

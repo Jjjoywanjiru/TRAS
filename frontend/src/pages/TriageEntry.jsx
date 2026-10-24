@@ -12,7 +12,7 @@ const EMPTY = {
 const NUMERIC_FIELDS = ['token_number', 'sex', 'age', 'arrival_mode', 'injury', 'mental',
   'nrs_pain', 'sbp', 'dbp', 'hr', 'rr', 'bt', 'saturation'];
 
-const TIER_COLOURS = { critical: '#fed7d7', urgent: '#feebc8', stable: '#c6f6d5' };
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
 
 export default function TriageEntry() {
   const [formData, setFormData] = useState(EMPTY);
@@ -56,10 +56,11 @@ export default function TriageEntry() {
     }
   };
 
-  const num = (label, name, extra = {}, required = false) => (
-    <div>
-      <label>{label}</label><br />
+  const num = (label, name, extra = {}, required = false, hint = '') => (
+    <div className="field">
+      <label htmlFor={name}>{label} {hint && <span className="hint">{hint}</span>}</label>
       <input
+        id={name}
         type="number"
         step="any"
         name={name}
@@ -68,16 +69,15 @@ export default function TriageEntry() {
         onWheel={(e) => e.currentTarget.blur()} // scrolling the page must never change a number
         required={required}
         autoComplete="off"
-        style={{ width: '100%' }}
         {...extra}
       />
     </div>
   );
 
   const select = (label, name, options) => (
-    <div>
-      <label>{label}</label><br />
-      <select name={name} value={formData[name]} onChange={handleChange} style={{ width: '100%' }}>
+    <div className="field">
+      <label htmlFor={name}>{label}</label>
+      <select id={name} name={name} value={formData[name]} onChange={handleChange}>
         {options.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
       </select>
     </div>
@@ -86,55 +86,65 @@ export default function TriageEntry() {
   const tier = result?.record?.predicted_severity;
 
   return (
-    <div style={{ maxWidth: '800px', margin: '0 auto', fontFamily: 'sans-serif' }}>
+    <div className="page">
       <div ref={topRef} />
-      <h2>Triage Data Entry</h2>
+      <div className="page-head">
+        <h1>Triage entry</h1>
+        <p>Record the patient's details and vitals. The system predicts a severity for the doctor to confirm.</p>
+      </div>
 
       {result && (
-        <div style={{ padding: '15px', backgroundColor: '#e6fffa', border: '1px solid #319795', marginBottom: '20px' }}>
-          <strong>{result.patient_code} saved and sent to the doctor.</strong>
-          <br />
-          Predicted severity:{' '}
-          <span style={{ backgroundColor: TIER_COLOURS[tier], padding: '2px 8px', borderRadius: '4px', textTransform: 'uppercase', fontWeight: 'bold' }}>
-            {tier}
-          </span>{' '}
+        <div className="notice ok">
+          <strong>{result.patient_code} saved and sent to the doctor.</strong>{' '}
+          Predicted severity: <span className={`tier tier-${tier}`}>{cap(tier)}</span>{' '}
           ({Math.round(result.prediction.confidence * 100)}% confidence)
         </div>
       )}
+      {error && <div className="notice err">{error}</div>}
 
-      {error && (
-        <div style={{ padding: '15px', backgroundColor: '#fff5f5', border: '1px solid #e53e3e', color: '#e53e3e', marginBottom: '20px' }}>
-          {error}
-        </div>
-      )}
+      <form className="panel" onSubmit={handleSubmit}>
+        <section className="form-section">
+          <h2>Patient</h2>
+          <div className="form-grid">
+            <div className="field">
+              <label htmlFor="patient_code">Patient code</label>
+              <input id="patient_code" type="text" name="patient_code" value={formData.patient_code} onChange={handleChange} required autoComplete="off" />
+            </div>
+            {num('Token number', 'token_number', { min: 1 }, true)}
+            {num('Age', 'age', { min: 0, max: 120 }, true, '(years)')}
+            {select('Sex', 'sex', [['1', 'Female'], ['2', 'Male']])}
+          </div>
+        </section>
 
-      <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-        <div>
-          <label>Patient Code</label><br />
-          <input type="text" name="patient_code" value={formData.patient_code} onChange={handleChange} required autoComplete="off" style={{ width: '100%' }} />
-        </div>
-        {num('Token Number', 'token_number', { min: 1 }, true)}
-        {num('Age', 'age', { min: 0, max: 120 }, true)}
-        {select('Sex', 'sex', [['1', 'Female'], ['2', 'Male']])}
-        {select('Arrival Mode', 'arrival_mode', [['1', 'Walking'], ['2', 'Public ambulance'], ['3', 'Private vehicle'], ['4', 'Private ambulance'], ['5', 'Other']])}
-        {select('Injury', 'injury', [['1', 'No'], ['2', 'Yes']])}
-        {select('Mental Status', 'mental', [['1', 'Alert'], ['2', 'Responds to voice'], ['3', 'Responds to pain'], ['4', 'Unresponsive']])}
-        {num('Pain Scale (0-10)', 'nrs_pain', { min: 0, max: 10 })}
-        {num('Systolic BP (mmHg)', 'sbp', { min: 40, max: 300 })}
-        {num('Diastolic BP (mmHg)', 'dbp', { min: 20, max: 200 })}
-        {num('Heart Rate (per min)', 'hr', { min: 20, max: 250 })}
-        {num('Respiratory Rate (per min)', 'rr', { min: 4, max: 70 })}
-        {num('Body Temp (°C)', 'bt', { min: 30, max: 45 })}
-        {num('O2 Saturation (%)', 'saturation', { min: 50, max: 100 })}
+        <section className="form-section">
+          <h2>Presentation</h2>
+          <div className="form-grid">
+            {select('Arrival mode', 'arrival_mode', [['1', 'Walking'], ['2', 'Public ambulance'], ['3', 'Private vehicle'], ['4', 'Private ambulance'], ['5', 'Other']])}
+            {select('Injury', 'injury', [['1', 'No'], ['2', 'Yes']])}
+            {select('Mental status', 'mental', [['1', 'Alert'], ['2', 'Responds to voice'], ['3', 'Responds to pain'], ['4', 'Unresponsive']])}
+            {num('Pain score', 'nrs_pain', { min: 0, max: 10 }, false, '(0 to 10)')}
+            <div className="field wide">
+              <label htmlFor="chief_complaint">Chief complaint <span className="hint">(in words, for example "chest pain and shortness of breath")</span></label>
+              <input id="chief_complaint" type="text" name="chief_complaint" value={formData.chief_complaint} onChange={handleChange} required autoComplete="off" />
+            </div>
+          </div>
+        </section>
 
-        <div style={{ gridColumn: 'span 2' }}>
-          <label>Chief Complaint (type it in words, e.g. "chest pain and shortness of breath")</label><br />
-          <input type="text" name="chief_complaint" value={formData.chief_complaint} onChange={handleChange} required autoComplete="off" style={{ width: '100%' }} />
-        </div>
+        <section className="form-section">
+          <h2>Vitals</h2>
+          <div className="form-grid">
+            {num('Systolic blood pressure', 'sbp', { min: 40, max: 300 }, false, '(mmHg)')}
+            {num('Diastolic blood pressure', 'dbp', { min: 20, max: 200 }, false, '(mmHg)')}
+            {num('Heart rate', 'hr', { min: 20, max: 250 }, false, '(per minute)')}
+            {num('Respiratory rate', 'rr', { min: 4, max: 70 }, false, '(per minute)')}
+            {num('Body temperature', 'bt', { min: 30, max: 45 }, false, '(°C)')}
+            {num('Oxygen saturation', 'saturation', { min: 50, max: 100 }, false, '(%)')}
+          </div>
+        </section>
 
-        <div style={{ gridColumn: 'span 2', marginTop: '10px' }}>
-          <button type="submit" disabled={loading} style={{ padding: '10px 20px', backgroundColor: '#2b6cb0', color: 'white', border: 'none', cursor: 'pointer', width: '100%' }}>
-            {loading ? 'Processing...' : 'Submit Triage Vitals'}
+        <div style={{ marginTop: '24px' }}>
+          <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%', minHeight: '52px', fontSize: '1.05rem' }}>
+            {loading ? 'Saving...' : 'Save and send to doctor'}
           </button>
         </div>
       </form>

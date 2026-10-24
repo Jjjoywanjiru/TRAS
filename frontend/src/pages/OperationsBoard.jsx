@@ -2,13 +2,8 @@ import { useState, useEffect } from 'react';
 import api from '../api';
 
 const REFRESH_MS = 5000;
-
-const SEVERITY_COLOURS = { critical: '#fed7d7', urgent: '#feebc8', stable: '#c6f6d5' };
-const ROOM_COLOURS = {
-  free: { bg: '#f0fff4', border: '#38a169', label: 'Free' },
-  reserved: { bg: '#fffaf0', border: '#ed8936', label: 'Reserved (awaiting confirmation)' },
-  occupied: { bg: '#fff5f5', border: '#e53e3e', label: 'Occupied' },
-};
+const STATE_TEXT = { free: 'Free', reserved: 'Reserved, awaiting confirmation', occupied: 'Occupied' };
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
 
 export default function OperationsBoard() {
   const [board, setBoard] = useState({ rooms: [], queue: [], awaiting: [], allocations: [] });
@@ -42,52 +37,46 @@ export default function OperationsBoard() {
   const patientInRoom = {};
   allocations.forEach((a) => { patientInRoom[a.room_id] = a; });
 
-  const count = (status) => rooms.filter((r) => r.status === status).length;
+  const freeCount = rooms.filter((r) => r.status === 'free').length;
   const criticalWaiting = queue.filter((q) => q.predicted_severity === 'critical').length;
   const longestWait = queue.length ? Math.max(...queue.map((q) => minutesSince(q.created_at))) : 0;
 
-  const tile = (label, value, colour) => (
-    <div style={{ flex: 1, minWidth: '140px', padding: '12px', borderRadius: '8px', backgroundColor: colour || '#edf2f7', textAlign: 'center' }}>
-      <div style={{ fontSize: '1.8rem', fontWeight: 'bold' }}>{value}</div>
-      <div style={{ fontSize: '0.85rem', color: '#4a5568' }}>{label}</div>
-    </div>
-  );
-
   return (
-    <div style={{ maxWidth: '1100px', margin: '0 auto', fontFamily: 'sans-serif' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <h2 style={{ marginBottom: 0 }}>Operations Board</h2>
-        <span style={{ fontSize: '0.8rem', color: '#718096' }}>
-          {updatedAt ? `Updated ${updatedAt.toLocaleTimeString()} (refreshes every ${REFRESH_MS / 1000}s)` : 'Loading...'}
+    <div className="page">
+      <div className="page-head head-row">
+        <div>
+          <h1>Operations board</h1>
+          <p>What is happening in the department right now.</p>
+        </div>
+        <span className="updated">
+          {updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}, refreshes every ${REFRESH_MS / 1000} seconds` : 'Loading...'}
         </span>
       </div>
 
-      {error && (
-        <div style={{ padding: '10px', backgroundColor: '#fff5f5', border: '1px solid #e53e3e', color: '#c53030', margin: '10px 0' }}>{error}</div>
-      )}
+      {error && <div className="notice warn">{error}</div>}
 
-      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', margin: '15px 0' }}>
-        {tile('Awaiting doctor review', queue.length)}
-        {tile('Critical waiting', criticalWaiting, criticalWaiting ? SEVERITY_COLOURS.critical : undefined)}
-        {tile('Longest wait (min)', longestWait)}
-        {tile('Waiting for a room', awaiting.length, awaiting.length ? '#fed7d7' : undefined)}
-        {tile('Rooms free', `${count('free')} / ${rooms.length}`, '#f0fff4')}
+      <div className="statbar">
+        <div className="stat"><div className="num">{queue.length}</div><div className="cap">Waiting for a doctor</div></div>
+        <div className={criticalWaiting ? 'stat alert' : 'stat'}><div className="num">{criticalWaiting}</div><div className="cap">Critical, waiting</div></div>
+        <div className="stat"><div className="num">{longestWait}<span className="muted" style={{ fontSize: '1rem' }}> min</span></div><div className="cap">Longest wait</div></div>
+        <div className={awaiting.length ? 'stat alert' : 'stat'}><div className="num">{awaiting.length}</div><div className="cap">Waiting for a room</div></div>
+        <div className="stat"><div className="num">{freeCount}<span className="muted" style={{ fontSize: '1rem' }}> of {rooms.length}</span></div><div className="cap">Rooms free</div></div>
       </div>
 
-      <h3>Rooms</h3>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '12px' }}>
+      <h2 className="section-title" style={{ marginTop: 0 }}>Rooms</h2>
+      <div className="bay-grid">
         {rooms.map((room) => {
-          const c = ROOM_COLOURS[room.status] || ROOM_COLOURS.free;
           const alloc = patientInRoom[room.id];
+          const sev = alloc?.triage_record?.final_severity;
           return (
-            <div key={room.id} style={{ backgroundColor: c.bg, border: `2px solid ${c.border}`, borderRadius: '8px', padding: '12px' }}>
-              <strong>{room.name}</strong>
-              <div style={{ fontSize: '0.8rem', color: '#718096' }}>{room.room_type}</div>
-              <div style={{ marginTop: '6px', fontSize: '0.9rem' }}>{c.label}</div>
+            <div key={room.id} className={`bay ${room.status}`}>
+              <div className="name">{room.name}</div>
+              <div className="type">{cap(room.room_type)}</div>
+              <div className="state">{STATE_TEXT[room.status] || room.status}</div>
               {alloc && room.status !== 'free' && (
-                <div style={{ marginTop: '4px', fontSize: '0.85rem' }}>
-                  {alloc.triage_record?.patient?.patient_code} &middot;{' '}
-                  <span style={{ textTransform: 'uppercase' }}>{alloc.triage_record?.final_severity}</span>
+                <div className="who-in">
+                  {alloc.triage_record?.patient?.patient_code}{' '}
+                  <span className={`tier tier-${sev}`}>{cap(sev)}</span>
                 </div>
               )}
             </div>
@@ -95,32 +84,22 @@ export default function OperationsBoard() {
         })}
       </div>
 
-      <h3 style={{ marginTop: '25px' }}>Doctor queue (most urgent first)</h3>
+      <h2 className="section-title">Waiting for a doctor</h2>
       {queue.length === 0 ? (
-        <p>No patients waiting for review.</p>
+        <p className="muted">Nobody is waiting for review.</p>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+        <table className="table">
           <thead>
-            <tr style={{ textAlign: 'left', borderBottom: '2px solid #cbd5e0' }}>
-              <th style={{ padding: '6px' }}>Token</th>
-              <th>Patient</th>
-              <th>Predicted</th>
-              <th>Complaint</th>
-              <th>Waiting</th>
-            </tr>
+            <tr><th>Token</th><th>Patient</th><th>Predicted</th><th>Complaint</th><th>Waiting</th></tr>
           </thead>
           <tbody>
             {queue.map((rec) => (
-              <tr key={rec.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                <td style={{ padding: '6px' }}>{rec.token_number}</td>
+              <tr key={rec.id}>
+                <td className="num">{rec.token_number}</td>
                 <td>{rec.patient?.patient_code}</td>
-                <td>
-                  <span style={{ backgroundColor: SEVERITY_COLOURS[rec.predicted_severity], padding: '2px 8px', borderRadius: '4px', textTransform: 'uppercase', fontSize: '0.8rem', fontWeight: 'bold' }}>
-                    {rec.predicted_severity}
-                  </span>
-                </td>
+                <td><span className={`tier tier-${rec.predicted_severity}`}>{cap(rec.predicted_severity)}</span></td>
                 <td>{rec.chief_complaint}</td>
-                <td>{minutesSince(rec.created_at)} min</td>
+                <td className="num">{minutesSince(rec.created_at)} min</td>
               </tr>
             ))}
           </tbody>
@@ -129,15 +108,19 @@ export default function OperationsBoard() {
 
       {awaiting.length > 0 && (
         <>
-          <h3 style={{ marginTop: '25px' }}>Reviewed, waiting for a room</h3>
-          <ul>
-            {awaiting.map((rec) => (
-              <li key={rec.id}>
-                {rec.patient?.patient_code} (token {rec.token_number}) &mdash;{' '}
-                <span style={{ textTransform: 'uppercase' }}>{rec.final_severity}</span>
-              </li>
-            ))}
-          </ul>
+          <h2 className="section-title">Reviewed, waiting for a room</h2>
+          <table className="table">
+            <thead><tr><th>Token</th><th>Patient</th><th>Severity</th></tr></thead>
+            <tbody>
+              {awaiting.map((rec) => (
+                <tr key={rec.id}>
+                  <td className="num">{rec.token_number}</td>
+                  <td>{rec.patient?.patient_code}</td>
+                  <td><span className={`tier tier-${rec.final_severity}`}>{cap(rec.final_severity)}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </>
       )}
     </div>

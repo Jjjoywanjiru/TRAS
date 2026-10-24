@@ -9,7 +9,7 @@ export default function Login() {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div className="page">Loading...</div>;
   if (profile) return <Navigate to={HOME_FOR_ROLE[profile.role] || '/dashboard'} replace />;
 
   const handleSubmit = async (e) => {
@@ -17,41 +17,40 @@ export default function Login() {
     setBusy(true);
     setError(null);
     const { error } = await signIn(email, password);
-    if (error) setError('Wrong email or password.');
+    if (error) setError('Wrong email or password. Check them and try again.');
     setBusy(false);
   };
 
   // Signed in with Supabase but the profile could not be loaded: retry or sign out
   if (session && profileError) {
     return (
-      <div style={{ maxWidth: '380px', margin: '40px auto', fontFamily: 'sans-serif' }}>
-        <div style={{ padding: '12px', backgroundColor: '#fff5f5', border: '1px solid #e53e3e', color: '#c53030', marginBottom: '15px' }}>
-          {profileError}
-        </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button onClick={retryProfile} style={{ padding: '8px 16px', cursor: 'pointer' }}>Try again</button>
-          <button onClick={signOut} style={{ padding: '8px 16px', cursor: 'pointer' }}>Sign out</button>
+      <div className="login-wrap">
+        <div className="notice err">{profileError}</div>
+        <div className="btn-row">
+          <button className="btn btn-primary" onClick={retryProfile}>Try again</button>
+          <button className="btn" onClick={signOut}>Sign out</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{ maxWidth: '380px', margin: '40px auto', fontFamily: 'sans-serif' }}>
-      <h2>TRAS Sign in</h2>
-      {error && (
-        <div style={{ padding: '10px', backgroundColor: '#fff5f5', border: '1px solid #e53e3e', color: '#c53030', marginBottom: '15px' }}>{error}</div>
-      )}
-      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '12px' }}>
-        <div>
-          <label>Email</label><br />
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ width: '100%', padding: '8px' }} />
+    <div className="login-wrap">
+      <div className="page-head">
+        <h1>Sign in to TRAS</h1>
+        <p>Use the account your administrator gave you.</p>
+      </div>
+      <form className="panel" onSubmit={handleSubmit}>
+        {error && <div className="notice err">{error}</div>}
+        <div className="field">
+          <label htmlFor="email">Email</label>
+          <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="username" />
         </div>
-        <div>
-          <label>Password</label><br />
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required style={{ width: '100%', padding: '8px' }} />
+        <div className="field">
+          <label htmlFor="password">Password</label>
+          <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
         </div>
-        <button type="submit" disabled={busy} style={{ padding: '10px', backgroundColor: '#2b6cb0', color: 'white', border: 'none', cursor: 'pointer' }}>
+        <button type="submit" className="btn btn-primary" disabled={busy}>
           {busy ? 'Signing in...' : 'Sign in'}
         </button>
       </form>
