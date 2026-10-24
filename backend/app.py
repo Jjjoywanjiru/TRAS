@@ -1,5 +1,7 @@
 #TRAS backend: receives triage data, predicts severity, manages queue, and saves to database.
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -8,15 +10,45 @@ from flask_cors import CORS
 
 # Make ml/triage_model.py importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ml"))
-from triage_model import predict_patient  
+from triage_model import predict_patient
 
 # Import Supabase client
 from db import supabase
 from auth import (login_required, roles_required,
                   ROLE_TRIAGE_NURSE, ROLE_DOCTOR, ROLE_NURSE_IN_CHARGE)
 
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+# True: when the Doctor confirms a CRITICAL patient, the recommended room is
+# assigned straight away (no waiting for the Nurse in Charge). The Nurse in
+# Charge still sees it and can move the patient to another room.
+# False: every room needs the Nurse in Charge's approval, as in the proposal.
+AUTO_CONFIRM_CRITICAL = True
+
+SLOW_MS = 300   # requests slower than this are printed in the Flask terminal
+
 app = Flask(__name__)
-CORS(app)  
+CORS(app)
+
+
+@app.before_request
+def _start_timer():
+    g.t0 = time.perf_counter()
+
+
+@app.after_request
+def _log_timing(response):
+    t0 = getattr(g, "t0", None)
+    if t0 is not None:
+        ms = (time.perf_counter() - t0) * 1000
+        response.headers["X-Response-Time-ms"] = f"{ms:.0f}"
+        # Print actions and slow requests, so you can see where time goes
+        if request.method not in ("OPTIONS",) and (request.method != "GET" or ms >= SLOW_MS):
+            tag = "SLOW " if ms >= SLOW_MS else ""
+            print(f"{tag}{request.method} {request.path} -> {response.status_code} in {ms:.0f} ms")
+    return response
+
 
 # API field name to name used by the model
 FIELD_MAP = {
@@ -39,12 +71,20 @@ FIELD_MAP = {
 # Required fields for ML prediction
 REQUIRED = ["sex", "age", "arrival_mode", "injury", "mental", "pain", "chief_complaint"]
 
+ACTIVE = ["pending", "confirmed", "modified"]   # allocation states that hold a room
 
-def recommend_room(triage_record_id: int, severity: str, exclude_room_ids=()):
+
+# ---------------------------------------------------------------------------
+# Room recommendation
+# ---------------------------------------------------------------------------
+def recommend_room(triage_record_id: int, severity: str, exclude_room_ids=(), auto_confirm_by=None):
     """
     Rule-based algorithm to match severity to the best available room type.
-    Holds the room by marking it 'reserved' and creates a pending allocation
-    for the Nurse in Charge to confirm, modify or reject.
+
+    Normal case: the room is held as 'reserved' and a 'pending' allocation is
+    created for the Nurse in Charge to confirm, modify or reject.
+    Fast-track (auto_confirm_by = a user id): the room is taken as 'occupied'
+    and the allocation is created already 'confirmed' by that user.
     """
     if severity == "critical":
         preferred_types = ["resus", "observation", "general"]
@@ -54,34 +94,88 @@ def recommend_room(triage_record_id: int, severity: str, exclude_room_ids=()):
         preferred_types = ["general", "observation", "resus"]
 
     res = supabase.table("room").select("*").eq("status", "free").order("id").execute()
-    free_rooms = [r for r in res.data if r["id"] not in set(exclude_room_ids)]
+    skip = set(exclude_room_ids)
+    free_rooms = [r for r in res.data if r["id"] not in skip]
 
-    # Candidates in rule order: preferred type first, then the next types
     candidates = []
     for r_type in preferred_types:
         candidates += [r for r in free_rooms if r["room_type"] == r_type]
 
+    new_status = "occupied" if auto_confirm_by else "reserved"
     for room in candidates:
-        # Reserve only if the room is STILL free. If another request took it
-        # a moment ago, this update changes nothing and we try the next room.
+        # Take the room only if it is STILL free. If another request took it
+        # a moment ago, this changes nothing and we try the next room.
         claimed = (
             supabase.table("room")
-            .update({"status": "reserved"})
+            .update({"status": new_status})
             .eq("id", room["id"])
             .eq("status", "free")
             .execute()
         )
         if claimed.data:
-            alloc_res = supabase.table("allocation").insert({
+            payload = {
                 "triage_record_id": triage_record_id,
                 "room_id": room["id"],
                 "decision": "pending",
-            }).execute()
-            return alloc_res.data[0]
+            }
+            if auto_confirm_by:
+                payload.update({
+                    "decision": "confirmed",
+                    "decided_by": auto_confirm_by,
+                    "decided_at": datetime.now(timezone.utc).isoformat(),
+                })
+            alloc = supabase.table("allocation").insert(payload).execute().data[0]
+            alloc["room"] = room
+            return alloc
 
     return None  # no free room: the ED is at physical capacity
 
 
+# ---------------------------------------------------------------------------
+# Data readers (shared by the single-purpose endpoints and /board)
+# ---------------------------------------------------------------------------
+def _rooms():
+    return supabase.table("room").select("*").order("id").execute().data
+
+
+def _queue():
+    # Postgres enums sort in the order they were defined: critical, urgent, stable.
+    return supabase.table("triage_record") \
+        .select("*, patient(*)") \
+        .is_("final_severity", "null") \
+        .order("predicted_severity", desc=False) \
+        .order("created_at", desc=False) \
+        .execute().data
+
+
+def _allocations():
+    rows = supabase.table("allocation") \
+        .select("*, triage_record(*, patient(*)), room(*)") \
+        .in_("decision", ACTIVE) \
+        .order("created_at", desc=False) \
+        .execute().data
+    active = [a for a in rows if a["triage_record"]["outcome"] is None]
+    for a in active:
+        # Rooms given automatically to Critical patients by the Doctor
+        a["auto_assigned"] = (a["decision"] == "confirmed"
+                              and a.get("decided_by") is not None
+                              and a["decided_by"] == a["triage_record"].get("reviewed_by"))
+    return active
+
+
+def _awaiting():
+    records = supabase.table("triage_record").select("*, patient(*)") \
+        .not_.is_("final_severity", "null").is_("outcome", "null") \
+        .order("final_severity", desc=False).order("created_at", desc=False).execute().data
+    allocs = supabase.table("allocation").select("triage_record_id") \
+        .in_("decision", ACTIVE).execute().data
+    has_room = {a["triage_record_id"] for a in allocs}
+    return [r for r in records if r["id"] not in has_room]
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 @app.get("/health")
 def health():
     """Simple health check endpoint."""
@@ -95,13 +189,25 @@ def me():
     return jsonify(g.user), 200
 
 
+@app.get("/board")
+@login_required
+def board():
+    """Everything the Board and Rooms screens need, in ONE request (fetched in parallel)."""
+    try:
+        jobs = {"rooms": _rooms, "queue": _queue, "awaiting": _awaiting, "allocations": _allocations}
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+            futures = {name: pool.submit(fn) for name, fn in jobs.items()}
+            return jsonify({name: f.result() for name, f in futures.items()}), 200
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+
 @app.get("/rooms")
 @login_required
 def get_rooms():
-    """Fetch all rooms for the Nurse in Charge dashboard."""
+    """Fetch all rooms."""
     try:
-        result = supabase.table("room").select("*").order("id").execute()
-        return jsonify(result.data), 200
+        return jsonify(_rooms()), 200
     except Exception as e:
         return jsonify(error=str(e)), 500
 
@@ -126,15 +232,14 @@ def create_triage():
         patient_features = {model_name: data.get(api_name) for api_name, model_name in FIELD_MAP.items()}
         if patient_features["Chief_complain"] is not None:
             patient_features["Chief_complain"] = str(patient_features["Chief_complain"])
-        
+
         result = predict_patient(patient_features)
     except (TypeError, ValueError):
         return jsonify(error="Numeric fields must be numbers."), 400
 
-    severity_val = result["tier"].lower()  # the model returns 'Critical' / 'Urgent' / 'Stable' 
+    severity_val = result["tier"].lower()  # the model returns 'Critical' / 'Urgent' / 'Stable'
 
     try:
-        # Insert or fetch the Patient
         # Using upsert based on patient_code to avoid duplicates if the patient returns
         patient_data = {
             "patient_code": data.get("patient_code"),
@@ -144,7 +249,6 @@ def create_triage():
         patient_res = supabase.table("patient").upsert(patient_data, on_conflict="patient_code").execute()
         patient_id = patient_res.data[0]["id"]
 
-        #Insert the Triage Record mapping to the SQL schema
         triage_payload = {
             "patient_id": patient_id,
             "recorded_by": g.user["id"],  # the signed-in nurse, taken from the token
@@ -166,9 +270,9 @@ def create_triage():
                 "reasons": result["reasons"],
             },
         }
-        
+
         triage_res = supabase.table("triage_record").insert(triage_payload).execute()
-        
+
         return jsonify({
             "prediction": result,
             "record": triage_res.data[0]
@@ -181,18 +285,9 @@ def create_triage():
 @app.get("/queue")
 @login_required
 def get_doctor_queue():
-    """Fetches patients waiting for doctor review, prioritised by severity then wait time."""
+    """Patients waiting for doctor review, prioritised by severity then wait time."""
     try:
-        # Postgres Enums sort in the order they are defined: 'critical', 'urgent', 'stable'.
-        # Therefore, order("predicted_severity", desc=False) puts critical first.
-        result = supabase.table("triage_record") \
-            .select("*, patient(*)") \
-            .is_("final_severity", "null") \
-            .order("predicted_severity", desc=False) \
-            .order("created_at", desc=False) \
-            .execute()
-        
-        return jsonify(result.data), 200
+        return jsonify(_queue()), 200
     except Exception as e:
         return jsonify(error=str(e)), 500
 
@@ -200,7 +295,7 @@ def get_doctor_queue():
 @app.patch("/triage/<int:record_id>/review")
 @roles_required(ROLE_DOCTOR)
 def review_triage(record_id):
-    """Allows the Doctor to accept or override the predicted severity and triggers allocation."""
+    """The Doctor accepts or overrides the predicted severity; this triggers the room recommendation."""
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(error="Send a JSON body."), 400
@@ -212,7 +307,8 @@ def review_triage(record_id):
     if not final_severity:
         return jsonify(error="'final_severity' is required."), 400
 
-    if final_severity.lower() not in ("critical", "urgent", "stable"):
+    final = final_severity.lower()
+    if final not in ("critical", "urgent", "stable"):
         return jsonify(error="'final_severity' must be critical, urgent or stable."), 400
 
     try:
@@ -221,33 +317,37 @@ def review_triage(record_id):
             return jsonify(error="Triage record not found."), 404
         if existing.data[0]["final_severity"] is not None:
             return jsonify(error="This patient has already been reviewed."), 409
-        if final_severity.lower() != existing.data[0]["predicted_severity"] and not override_reason:
+        if final != existing.data[0]["predicted_severity"] and not override_reason:
             return jsonify(error="An override reason is required when changing the severity."), 400
 
-        # Update the triage record with the doctor's decision
         update_payload = {
-            "final_severity": final_severity.lower(),
+            "final_severity": final,
             "override_reason": override_reason,
             "reviewed_by": doctor_id,
             "reviewed_at": datetime.now(timezone.utc).isoformat()
         }
-
         result = supabase.table("triage_record").update(update_payload).eq("id", record_id).execute()
-        
         if not result.data:
             return jsonify(error="Triage record not found."), 404
 
-        # Trigger Room Recommendation
-        allocation = recommend_room(record_id, final_severity.lower())
-        
-        response_data = {
+        # Room recommendation. Critical patients can skip the approval wait.
+        auto = AUTO_CONFIRM_CRITICAL and final == "critical"
+        allocation = recommend_room(record_id, final, auto_confirm_by=doctor_id if auto else None)
+
+        if not allocation:
+            message = "Severity confirmed. No rooms currently available; the patient is waiting for a room."
+        elif auto:
+            message = f"Critical: {allocation['room']['name']} assigned immediately."
+        else:
+            message = f"Severity confirmed. {allocation['room']['name']} recommended."
+
+        return jsonify({
             "triage_record": result.data[0],
             "allocation": allocation,
-            "message": "Severity confirmed. Room recommended." if allocation else "Severity confirmed. No rooms currently available."
-        }
-        
-        return jsonify(response_data), 200
-        
+            "auto_assigned": bool(allocation and auto),
+            "message": message,
+        }), 200
+
     except Exception as e:
         return jsonify(error=str(e)), 500
 
@@ -257,8 +357,9 @@ def review_triage(record_id):
 def decide_allocation(alloc_id):
     """
     Nurse in Charge confirms, modifies, or rejects the recommended room.
-    Updates both the allocation record and the room statuses.
     A rejected room is released and the next best free room is recommended.
+    A room that is already confirmed (including one given automatically to a
+    Critical patient) can still be changed with 'modified'.
     """
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -278,7 +379,9 @@ def decide_allocation(alloc_id):
             return jsonify(error="Allocation not found."), 404
 
         current_alloc = alloc_res.data[0]
-        if current_alloc["decision"] != "pending":
+        state = current_alloc["decision"]
+        can_reassign = decision == "modified" and state in ("confirmed", "modified")
+        if state != "pending" and not can_reassign:
             return jsonify(error="This allocation has already been decided."), 409
         current_room_id = current_alloc["room_id"]
 
@@ -287,7 +390,6 @@ def decide_allocation(alloc_id):
             "decided_by": nurse_id,
             "decided_at": datetime.now(timezone.utc).isoformat()
         }
-        next_allocation = None
 
         if decision == "confirmed":
             supabase.table("room").update({"status": "occupied"}).eq("id", current_room_id).execute()
@@ -296,7 +398,6 @@ def decide_allocation(alloc_id):
             new_room_id = data.get("new_room_id")
             if not new_room_id:
                 return jsonify(error="'new_room_id' is required when modifying an allocation."), 400
-            # The replacement room must be free right now
             claimed = (
                 supabase.table("room").update({"status": "occupied"})
                 .eq("id", new_room_id).eq("status", "free").execute()
@@ -308,7 +409,6 @@ def decide_allocation(alloc_id):
 
         elif decision == "rejected":
             supabase.table("room").update({"status": "free"}).eq("id", current_room_id).execute()
-            # Recommend the next best room, skipping any this patient was already refused
             refused = supabase.table("allocation").select("room_id") \
                 .eq("triage_record_id", current_alloc["triage_record_id"]) \
                 .eq("decision", "rejected").execute()
@@ -322,7 +422,7 @@ def decide_allocation(alloc_id):
             return jsonify({
                 "allocation": {**current_alloc, **update_payload},
                 "next_allocation": next_allocation,
-                "message": "Room rejected. Next room recommended." if next_allocation
+                "message": f"Room rejected. {next_allocation['room']['name']} recommended." if next_allocation
                            else "Room rejected. No other room is available; the patient is waiting for a room.",
             }), 200
 
@@ -356,7 +456,7 @@ def log_outcome(record_id):
         # Free any room this patient still holds (rejected rooms were freed earlier)
         alloc_res = supabase.table("allocation").select("*") \
             .eq("triage_record_id", record_id) \
-            .in_("decision", ["pending", "confirmed", "modified"]).execute()
+            .in_("decision", ACTIVE).execute()
         for alloc in alloc_res.data:
             supabase.table("room").update({"status": "free"}).eq("id", alloc["room_id"]).execute()
 
@@ -369,15 +469,9 @@ def log_outcome(record_id):
 @app.get("/allocations")
 @login_required
 def get_allocations():
-    """Active allocations for the Nurse in Charge (patients with an outcome are hidden)."""
+    """Active allocations (patients with an outcome are hidden)."""
     try:
-        result = supabase.table("allocation") \
-            .select("*, triage_record(*, patient(*)), room(*)") \
-            .in_("decision", ["pending", "confirmed", "modified"]) \
-            .order("created_at", desc=False) \
-            .execute()
-        active = [a for a in result.data if a["triage_record"]["outcome"] is None]
-        return jsonify(active), 200
+        return jsonify(_allocations()), 200
     except Exception as e:
         return jsonify(error=str(e)), 500
 
@@ -387,13 +481,7 @@ def get_allocations():
 def get_awaiting_room():
     """Reviewed patients with no outcome and no active room (e.g. the ED was full)."""
     try:
-        records = supabase.table("triage_record").select("*, patient(*)") \
-            .not_.is_("final_severity", "null").is_("outcome", "null") \
-            .order("final_severity", desc=False).order("created_at", desc=False).execute()
-        allocs = supabase.table("allocation").select("triage_record_id") \
-            .in_("decision", ["pending", "confirmed", "modified"]).execute()
-        has_room = {a["triage_record_id"] for a in allocs.data}
-        return jsonify([r for r in records.data if r["id"] not in has_room]), 200
+        return jsonify(_awaiting()), 200
     except Exception as e:
         return jsonify(error=str(e)), 500
 
@@ -410,13 +498,13 @@ def recommend_for_waiting(record_id):
         if rec["final_severity"] is None or rec["outcome"] is not None:
             return jsonify(error="Patient must be reviewed and not yet discharged."), 409
         active = supabase.table("allocation").select("id").eq("triage_record_id", record_id) \
-            .in_("decision", ["pending", "confirmed", "modified"]).execute()
+            .in_("decision", ACTIVE).execute()
         if active.data:
             return jsonify(error="This patient already has a room."), 409
         allocation = recommend_room(record_id, rec["final_severity"])
         if not allocation:
             return jsonify(allocation=None, message="Still no free room."), 200
-        return jsonify(allocation=allocation, message="Room recommended."), 200
+        return jsonify(allocation=allocation, message=f"{allocation['room']['name']} recommended."), 200
     except Exception as e:
         return jsonify(error=str(e)), 500
 

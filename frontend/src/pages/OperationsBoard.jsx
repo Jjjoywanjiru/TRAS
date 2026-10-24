@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import axios from '../api';
+import api from '../api';
 
-const API = 'http://127.0.0.1:5000';
 const REFRESH_MS = 5000;
 
 const SEVERITY_COLOURS = { critical: '#fed7d7', urgent: '#feebc8', stable: '#c6f6d5' };
@@ -11,31 +10,20 @@ const ROOM_COLOURS = {
   occupied: { bg: '#fff5f5', border: '#e53e3e', label: 'Occupied' },
 };
 
-const minutesSince = (iso) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
-
 export default function OperationsBoard() {
-  const [rooms, setRooms] = useState([]);
-  const [queue, setQueue] = useState([]);
-  const [waiting, setWaiting] = useState([]);
-  const [allocations, setAllocations] = useState([]);
+  const [board, setBoard] = useState({ rooms: [], queue: [], awaiting: [], allocations: [] });
   const [updatedAt, setUpdatedAt] = useState(null);
+  const [now, setNow] = useState(() => Date.now());
   const [error, setError] = useState(null);
 
   useEffect(() => {
     let active = true;
     const load = async () => {
       try {
-        const [r, q, w, a] = await Promise.all([
-          axios.get(`${API}/rooms`),
-          axios.get(`${API}/queue`),
-          axios.get(`${API}/awaiting-room`),
-          axios.get(`${API}/allocations`),
-        ]);
+        const res = await api.get('/board'); // one request for the whole board
         if (!active) return;
-        setRooms(r.data || []);
-        setQueue(q.data || []);
-        setWaiting(w.data || []);
-        setAllocations(a.data || []);
+        setBoard(res.data);
+        setNow(Date.now());
         setUpdatedAt(new Date());
         setError(null);
       } catch (err) {
@@ -44,9 +32,12 @@ export default function OperationsBoard() {
       }
     };
     load();
-    const timer = setInterval(load, REFRESH_MS); // refresh automatically
+    const timer = setInterval(load, REFRESH_MS);
     return () => { active = false; clearInterval(timer); };
   }, []);
+
+  const { rooms, queue, awaiting, allocations } = board;
+  const minutesSince = (iso) => Math.max(0, Math.round((now - new Date(iso).getTime()) / 60000));
 
   const patientInRoom = {};
   allocations.forEach((a) => { patientInRoom[a.room_id] = a; });
@@ -79,7 +70,7 @@ export default function OperationsBoard() {
         {tile('Awaiting doctor review', queue.length)}
         {tile('Critical waiting', criticalWaiting, criticalWaiting ? SEVERITY_COLOURS.critical : undefined)}
         {tile('Longest wait (min)', longestWait)}
-        {tile('Waiting for a room', waiting.length, waiting.length ? '#fed7d7' : undefined)}
+        {tile('Waiting for a room', awaiting.length, awaiting.length ? '#fed7d7' : undefined)}
         {tile('Rooms free', `${count('free')} / ${rooms.length}`, '#f0fff4')}
       </div>
 
@@ -136,11 +127,11 @@ export default function OperationsBoard() {
         </table>
       )}
 
-      {waiting.length > 0 && (
+      {awaiting.length > 0 && (
         <>
           <h3 style={{ marginTop: '25px' }}>Reviewed, waiting for a room</h3>
           <ul>
-            {waiting.map((rec) => (
+            {awaiting.map((rec) => (
               <li key={rec.id}>
                 {rec.patient?.patient_code} (token {rec.token_number}) &mdash;{' '}
                 <span style={{ textTransform: 'uppercase' }}>{rec.final_severity}</span>

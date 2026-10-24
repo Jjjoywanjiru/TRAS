@@ -8,6 +8,7 @@ export function AuthProvider({ children }) {
   const [authReady, setAuthReady] = useState(false); // have we checked for an existing session yet?
   const [profile, setProfile] = useState(null); // { id, full_name, role }
   const [profileError, setProfileError] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Keep the session in step with Supabase (sign in, sign out, token refresh)
   useEffect(() => {
@@ -32,20 +33,23 @@ export function AuthProvider({ children }) {
       .catch((err) => {
         if (active) {
           setProfile(null);
-          setProfileError(err.response?.data?.error || 'Could not load your profile.');
+          setProfileError(
+            err.response?.data?.error || 'Cannot reach the server. Check your connection and try again.'
+          );
         }
       });
     return () => { active = false; };
-  }, [session]);
+  }, [session, reloadKey]);
 
   // Loading until we know the session, and, if signed in, until the profile (or an error) arrives
   const loading = !authReady || (!!session && !profile && !profileError);
 
   const signIn = (email, password) => supabase.auth.signInWithPassword({ email, password });
   const signOut = () => supabase.auth.signOut();
+  const retryProfile = () => { setProfileError(null); setReloadKey((k) => k + 1); };
 
   return (
-    <AuthContext.Provider value={{ session, profile, profileError, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ session, profile, profileError, loading, signIn, signOut, retryProfile }}>
       {children}
     </AuthContext.Provider>
   );

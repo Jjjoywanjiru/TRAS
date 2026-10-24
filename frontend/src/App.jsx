@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, NavLink } from 'react-router-dom';
 import { AuthProvider } from './AuthContext';
 import { useAuth, HOME_FOR_ROLE } from './authState';
 import Login from './pages/Login';
@@ -7,7 +7,16 @@ import DoctorQueue from './pages/DoctorQueue';
 import RoomManagement from './pages/RoomManagement';
 import OperationsBoard from './pages/OperationsBoard';
 
-const linkStyle = { color: 'white', textDecoration: 'none' };
+// The link for the page you are on is highlighted
+const linkStyle = ({ isActive }) => ({
+  color: 'white',
+  textDecoration: 'none',
+  padding: '6px 14px',
+  borderRadius: '6px',
+  fontWeight: isActive ? 'bold' : 'normal',
+  backgroundColor: isActive ? 'rgba(255,255,255,0.28)' : 'transparent',
+  borderBottom: isActive ? '3px solid #90cdf4' : '3px solid transparent',
+});
 
 // Only lets the listed roles in; everyone else is sent to their own home screen
 function Protected({ roles, children }) {
@@ -25,11 +34,11 @@ function NavBar() {
   if (!profile) return null;
   const role = profile.role;
   return (
-    <nav style={{ backgroundColor: '#2a4365', padding: '15px', color: 'white', marginBottom: '20px', display: 'flex', gap: '15px', alignItems: 'center' }}>
-      {role === 'triage_nurse' && <Link to="/triage" style={linkStyle}>Triage</Link>}
-      {role === 'doctor' && <Link to="/doctor" style={linkStyle}>Doctor</Link>}
-      {role === 'nurse_in_charge' && <Link to="/rooms" style={linkStyle}>Rooms</Link>}
-      <Link to="/dashboard" style={linkStyle}>Board</Link>
+    <nav style={{ backgroundColor: '#2a4365', padding: '10px 15px', color: 'white', marginBottom: '20px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+      {role === 'triage_nurse' && <NavLink to="/triage" style={linkStyle}>Triage</NavLink>}
+      {role === 'doctor' && <NavLink to="/doctor" style={linkStyle}>Doctor</NavLink>}
+      {role === 'nurse_in_charge' && <NavLink to="/rooms" style={linkStyle}>Rooms</NavLink>}
+      <NavLink to="/dashboard" style={linkStyle}>Board</NavLink>
       <span style={{ marginLeft: 'auto', fontSize: '0.9rem' }}>
         {profile.full_name} ({role.replace(/_/g, ' ')})
       </span>

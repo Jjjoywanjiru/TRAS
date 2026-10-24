@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom';
 import { useAuth, HOME_FOR_ROLE } from '../authState';
 
 export default function Login() {
-  const { signIn, signOut, profile, profileError, session, loading } = useAuth();
+  const { signIn, signOut, retryProfile, profile, profileError, session, loading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
@@ -21,14 +21,17 @@ export default function Login() {
     setBusy(false);
   };
 
-  // Signed in with Supabase but no staff profile: let them sign out
+  // Signed in with Supabase but the profile could not be loaded: retry or sign out
   if (session && profileError) {
     return (
       <div style={{ maxWidth: '380px', margin: '40px auto', fontFamily: 'sans-serif' }}>
         <div style={{ padding: '12px', backgroundColor: '#fff5f5', border: '1px solid #e53e3e', color: '#c53030', marginBottom: '15px' }}>
           {profileError}
         </div>
-        <button onClick={signOut} style={{ padding: '8px 16px' }}>Sign out</button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={retryProfile} style={{ padding: '8px 16px', cursor: 'pointer' }}>Try again</button>
+          <button onClick={signOut} style={{ padding: '8px 16px', cursor: 'pointer' }}>Sign out</button>
+        </div>
       </div>
     );
   }
