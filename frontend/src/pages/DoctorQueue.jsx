@@ -114,6 +114,12 @@ export default function DoctorQueue() {
                 <Readout label="Temperature" unit="°C" valueKey="temperature" value={record.temperature} />
               </div>
 
+              {record.spo2 == null && (
+                <div className="notice warn">
+                  Oxygen was not recorded, so the prediction is less reliable. Check the patient's oxygen level before you confirm.
+                </div>
+              )}
+
               <p style={{ marginBottom: '12px' }}><strong>Complaint:</strong> {record.chief_complaint}</p>
 
               {reasons && (

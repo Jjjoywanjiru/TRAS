@@ -226,3 +226,9 @@ input:focus, select:focus { border-color: var(--focus); }
   .stat { min-width: 45%; border-bottom: 1px solid var(--line); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* Checkbox next to a field, for example "Oxygen could not be measured" */
+.check-field { justify-content: flex-end; }
+.field label.check { display: flex; align-items: center; gap: 10px; font-weight: 500; min-height: 44px; cursor: pointer; }
+.field label.check input { width: 22px; height: 22px; min-height: 0; margin: 0; flex: none; }
+@media (min-width: 761px) { .check-field { grid-column: 2; } }

@@ -19,6 +19,7 @@ export default function TriageEntry() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [noOxygen, setNoOxygen] = useState(false); // the nurse says oxygen could not be measured
   const topRef = useRef(null);
 
   const handleChange = (e) => {
@@ -31,6 +32,13 @@ export default function TriageEntry() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    // Oxygen is the most important vital for spotting critical patients, so it can only
+    // be left empty on purpose.
+    if (formData.saturation === '' && !noOxygen) {
+      setError('Enter the oxygen saturation, or tick "Oxygen could not be measured". The prediction is less reliable without it.');
+      topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     setLoading(true);
     setError(null);
     setResult(null);
@@ -47,6 +55,7 @@ export default function TriageEntry() {
       setResult({ ...response.data, patient_code: formData.patient_code });
       // Ready for the next patient: empty form, token number one higher
       setFormData({ ...EMPTY, token_number: String(Number(formData.token_number) + 1) });
+      setNoOxygen(false);
       topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) {
       setError(err.response?.data?.error || 'Cannot reach the server. Nothing was saved; please try again.');
@@ -138,7 +147,21 @@ export default function TriageEntry() {
             {num('Heart rate', 'hr', { min: 20, max: 250 }, false, '(per minute)')}
             {num('Respiratory rate', 'rr', { min: 4, max: 70 }, false, '(per minute)')}
             {num('Body temperature', 'bt', { min: 30, max: 45 }, false, '(°C)')}
-            {num('Oxygen saturation', 'saturation', { min: 50, max: 100 }, false, '(%)')}
+            {num('Oxygen saturation', 'saturation', { min: 50, max: 100, disabled: noOxygen }, false, '(%)')}
+            <div className="field check-field">
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={noOxygen}
+                  onChange={(e) => {
+                    setNoOxygen(e.target.checked);
+                    if (e.target.checked) setFormData((prev) => ({ ...prev, saturation: '' }));
+                    if (error) setError(null);
+                  }}
+                />
+                Oxygen could not be measured
+              </label>
+            </div>
           </div>
         </section>
 
