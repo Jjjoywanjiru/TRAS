@@ -11,6 +11,7 @@ from flask_cors import CORS
 # Make ml/triage_model.py importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ml"))
 from triage_model import predict_patient
+from safety_rules import apply_safety_floor
 
 # Import Supabase client
 from db import supabase
@@ -234,6 +235,7 @@ def create_triage():
             patient_features["Chief_complain"] = str(patient_features["Chief_complain"])
 
         result = predict_patient(patient_features)
+        result = apply_safety_floor(patient_features, result)  # never rank dangerous vitals too low
     except (TypeError, ValueError):
         return jsonify(error="Numeric fields must be numbers."), 400
 
@@ -268,6 +270,8 @@ def create_triage():
                 "probabilities": result["probabilities"],
                 "complaint_group": result["complaint_group"],
                 "reasons": result["reasons"],
+                "model_tier": result["model_tier"],
+                "floor_applied": result["floor_applied"],
             },
         }
 
