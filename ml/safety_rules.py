@@ -11,6 +11,11 @@ a patient with clearly dangerous vitals is never ranked below a minimum tier.
 
 TIER_ORDER = {"Critical": 0, "Urgent": 1, "Stable": 2}   # lower number = more severe
 
+# The Urgent-level rules are switched OFF by default. On the 254-patient test set they
+# raised 11 Stable patients to Urgent and helped no Urgent patient. The Critical-level
+# rules stay on. Set this to True to switch the Urgent rules on again.
+URGENT_FLOOR = False
+
 # Each rule: (tier it forces, vital name, test function, text shown to the doctor)
 # Vital names are the model's field names: SBP, HR, RR, BT, Saturation, Mental.
 RULES = [
@@ -55,6 +60,8 @@ def apply_safety_floor(patient, result):
 
     floor, fired = None, []
     for tier, field, test, text in RULES:
+        if tier == "Urgent" and not URGENT_FLOOR:
+            continue
         value = _number(patient.get(field))
         if value is None or not test(value):
             continue
