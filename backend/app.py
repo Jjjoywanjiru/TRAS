@@ -1,4 +1,5 @@
 #TRAS backend: receives triage data, predicts severity, manages queue, and saves to database.
+import random
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -26,6 +27,11 @@ from auth import (login_required, roles_required,
 # Charge still sees it and can move the patient to another room.
 # False: every room needs the Nurse in Charge's approval, as in the proposal.
 AUTO_CONFIRM_CRITICAL = True
+
+# Stable patients wait in the shared Stable waiting area while it has space. When it is
+# full they may take a single treatment ("general") room. Set this to False to make
+# them wait on the waiting-for-a-room list instead, which keeps treatment rooms free.
+STABLE_CAN_USE_TREATMENT_ROOMS = True
 
 SLOW_MS = 300   # requests slower than this are printed in the Flask terminal
 
@@ -78,65 +84,129 @@ ACTIVE = ["pending", "confirmed", "modified"]   # allocation states that hold a 
 # ---------------------------------------------------------------------------
 # Room recommendation
 # ---------------------------------------------------------------------------
+def _is_shared(room):
+    """A shared room (the Stable waiting area) holds several patients at once."""
+    return (room.get("capacity") or 1) > 1
+
+
+def _get_room(room_id):
+    rows = supabase.table("room").select("*").eq("id", room_id).execute().data
+    return rows[0] if rows else None
+
+
+def _occupants(room_id=None):
+    """How many patients hold a place right now, counted from the active allocations
+    (so the number can never drift out of step with them).
+    No argument: {room_id: count} for every room. With a room id: the count for that room."""
+    query = supabase.table("allocation").select("room_id, triage_record(outcome)").in_("decision", ACTIVE)
+    if room_id is not None:
+        query = query.eq("room_id", room_id)
+    counts = {}
+    for a in query.execute().data:
+        if a["triage_record"]["outcome"] is None:
+            counts[a["room_id"]] = counts.get(a["room_id"], 0) + 1
+    return counts.get(room_id, 0) if room_id is not None else counts
+
+
+def _claim(room, payload, new_status):
+    """Take a place in the room. Returns the new allocation, or None if the place was
+    taken a moment ago by someone else."""
+    if _is_shared(room):
+        for _ in range(3):
+            if _occupants(room["id"]) >= room["capacity"]:
+                return None                                # really full
+            alloc = supabase.table("allocation").insert(payload).execute().data[0]
+            if _occupants(room["id"]) <= room["capacity"]:
+                return alloc
+            # Two requests took the last place at the same moment: both step back, wait a
+            # random instant so they do not collide again, and look again.
+            supabase.table("allocation").delete().eq("id", alloc["id"]).execute()
+            time.sleep(random.uniform(0.01, 0.06))
+        return None
+    # Single room: take it only if it is STILL free. If another request took it a moment
+    # ago, this changes nothing and the caller tries the next room.
+    claimed = (
+        supabase.table("room").update({"status": new_status})
+        .eq("id", room["id"]).eq("status", "free").execute()
+    )
+    if not claimed.data:
+        return None
+    return supabase.table("allocation").insert(payload).execute().data[0]
+
+
+def _release(room_id):
+    """Give a room back. A shared room needs nothing, because its places are counted
+    from the allocations."""
+    room = _get_room(room_id)
+    if room and not _is_shared(room):
+        supabase.table("room").update({"status": "free"}).eq("id", room_id).execute()
+
+
 def recommend_room(triage_record_id: int, severity: str, exclude_room_ids=(), auto_confirm_by=None):
     """
-    Rule-based algorithm to match severity to the best available room type.
+    Rule-based algorithm to match severity to the best available room.
 
-    Normal case: the room is held as 'reserved' and a 'pending' allocation is
+    Critical: resus, then observation, then general (single rooms only).
+    Urgent:   observation, then general, then resus (single rooms only).
+    Stable:   the shared Stable waiting area while it has space, then a general room
+              (see STABLE_CAN_USE_TREATMENT_ROOMS). Only Stable patients use the shared area.
+
+    Normal case: a single room is held as 'reserved' and a 'pending' allocation is
     created for the Nurse in Charge to confirm, modify or reject.
     Fast-track (auto_confirm_by = a user id): the room is taken as 'occupied'
     and the allocation is created already 'confirmed' by that user.
     """
+    skip = set(exclude_room_ids)
+    free_rooms = [r for r in _rooms() if r["status"] == "free" and r["id"] not in skip]
+    shared = [r for r in free_rooms if _is_shared(r)]
+    single = [r for r in free_rooms if not _is_shared(r)]
+
     if severity == "critical":
         preferred_types = ["resus", "observation", "general"]
     elif severity == "urgent":
         preferred_types = ["observation", "general", "resus"]
     else:  # stable
-        preferred_types = ["general", "observation", "resus"]
+        preferred_types = ["general"] if STABLE_CAN_USE_TREATMENT_ROOMS else []
 
-    res = supabase.table("room").select("*").eq("status", "free").order("id").execute()
-    skip = set(exclude_room_ids)
-    free_rooms = [r for r in res.data if r["id"] not in skip]
-
-    candidates = []
+    candidates = shared if severity == "stable" else []
     for r_type in preferred_types:
-        candidates += [r for r in free_rooms if r["room_type"] == r_type]
+        candidates += [r for r in single if r["room_type"] == r_type]
 
     new_status = "occupied" if auto_confirm_by else "reserved"
     for room in candidates:
-        # Take the room only if it is STILL free. If another request took it
-        # a moment ago, this changes nothing and we try the next room.
-        claimed = (
-            supabase.table("room")
-            .update({"status": new_status})
-            .eq("id", room["id"])
-            .eq("status", "free")
-            .execute()
-        )
-        if claimed.data:
-            payload = {
-                "triage_record_id": triage_record_id,
-                "room_id": room["id"],
-                "decision": "pending",
-            }
-            if auto_confirm_by:
-                payload.update({
-                    "decision": "confirmed",
-                    "decided_by": auto_confirm_by,
-                    "decided_at": datetime.now(timezone.utc).isoformat(),
-                })
-            alloc = supabase.table("allocation").insert(payload).execute().data[0]
+        payload = {
+            "triage_record_id": triage_record_id,
+            "room_id": room["id"],
+            "decision": "pending",
+        }
+        if auto_confirm_by:
+            payload.update({
+                "decision": "confirmed",
+                "decided_by": auto_confirm_by,
+                "decided_at": datetime.now(timezone.utc).isoformat(),
+            })
+        alloc = _claim(room, payload, new_status)
+        if alloc:
             alloc["room"] = room
             return alloc
 
-    return None  # no free room: the ED is at physical capacity
+    return None  # no suitable free room: the patient waits on the waiting-for-a-room list
 
 
 # ---------------------------------------------------------------------------
 # Data readers (shared by the single-purpose endpoints and /board)
 # ---------------------------------------------------------------------------
 def _rooms():
-    return supabase.table("room").select("*").order("id").execute().data
+    rooms = supabase.table("room").select("*").order("id").execute().data
+    shared = [r for r in rooms if _is_shared(r)]
+    if shared:
+        counts = _occupants()
+        for r in shared:
+            # Worked out from the allocations, not stored, so it is always right
+            r["occupants"] = counts.get(r["id"], 0)
+            r["free_spots"] = max(0, r["capacity"] - r["occupants"])
+            r["status"] = "occupied" if r["free_spots"] == 0 else "free"
+    return rooms
 
 
 def _queue():
@@ -396,23 +466,46 @@ def decide_allocation(alloc_id):
         }
 
         if decision == "confirmed":
-            supabase.table("room").update({"status": "occupied"}).eq("id", current_room_id).execute()
+            current_room = _get_room(current_room_id)
+            if current_room and not _is_shared(current_room):
+                supabase.table("room").update({"status": "occupied"}).eq("id", current_room_id).execute()
 
         elif decision == "modified":
             new_room_id = data.get("new_room_id")
             if not new_room_id:
                 return jsonify(error="'new_room_id' is required when modifying an allocation."), 400
+            if int(new_room_id) == current_room_id:
+                return jsonify(error="The patient is already in that room."), 400
+            target = _get_room(new_room_id)
+            if not target:
+                return jsonify(error="Room not found."), 404
+
+            if _is_shared(target):
+                record = supabase.table("triage_record").select("final_severity") \
+                    .eq("id", current_alloc["triage_record_id"]).execute()
+                if (record.data[0]["final_severity"] if record.data else None) != "stable":
+                    return jsonify(error="Only Stable patients can wait in the shared area."), 400
+                if _occupants(target["id"]) >= target["capacity"]:
+                    return jsonify(error="That room is not free."), 409
+                update_payload["room_id"] = target["id"]
+                result = supabase.table("allocation").update(update_payload).eq("id", alloc_id).execute()
+                if _occupants(target["id"]) > target["capacity"]:   # the last place was taken at the same moment
+                    supabase.table("allocation").update({"room_id": current_room_id}).eq("id", alloc_id).execute()
+                    return jsonify(error="That room is not free."), 409
+                _release(current_room_id)
+                return jsonify({"allocation": result.data[0], "next_allocation": None}), 200
+
             claimed = (
                 supabase.table("room").update({"status": "occupied"})
                 .eq("id", new_room_id).eq("status", "free").execute()
             )
             if not claimed.data:
                 return jsonify(error="That room is not free."), 409
-            supabase.table("room").update({"status": "free"}).eq("id", current_room_id).execute()
+            _release(current_room_id)
             update_payload["room_id"] = new_room_id
 
         elif decision == "rejected":
-            supabase.table("room").update({"status": "free"}).eq("id", current_room_id).execute()
+            _release(current_room_id)
             refused = supabase.table("allocation").select("room_id") \
                 .eq("triage_record_id", current_alloc["triage_record_id"]) \
                 .eq("decision", "rejected").execute()
@@ -462,7 +555,7 @@ def log_outcome(record_id):
             .eq("triage_record_id", record_id) \
             .in_("decision", ACTIVE).execute()
         for alloc in alloc_res.data:
-            supabase.table("room").update({"status": "free"}).eq("id", alloc["room_id"]).execute()
+            _release(alloc["room_id"])
 
         return jsonify({"message": f"Patient {outcome}. Room is now available."}), 200
 

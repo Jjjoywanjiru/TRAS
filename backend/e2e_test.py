@@ -4,7 +4,8 @@ Runs the whole workflow against your RUNNING backend and real Supabase, as the
 three real roles, and prints PASS / FAIL for every step with how long it took.
 It covers every doctor and room button: confirm, override, auto-assigned
 Critical room, confirm room, reject, modify, move a confirmed patient, each
-outcome, the waiting-for-room list, and the role-security rules.
+outcome, the waiting-for-room list, the shared Stable waiting area (when your
+database has one), and the role-security rules.
 
 How to run (Flask must be running in another terminal, .venv active):
 
@@ -129,6 +130,14 @@ def main(argv):
 
     if "--no-reset" not in argv:
         supabase.table("room").update({"status": "free"}).neq("status", "free").execute()
+
+    # Shared rooms (the Stable waiting area) have a capacity above 1. If the capacity
+    # column has not been added yet, there are none and those checks are skipped.
+    try:
+        shared_rooms = supabase.table("room").select("id, name, capacity").gt("capacity", 1).execute().data
+    except Exception:
+        shared_rooms = []
+    shared_ids = {r["id"] for r in shared_rooms}
 
     try:
         section("Security rules")
@@ -255,9 +264,95 @@ def main(argv):
         check("All rooms are free again", all(r["status"] == "free" for r in rooms.values()), ms,
               str([r["name"] for r in rooms.values() if r["status"] != "free"]))
 
+        if shared_rooms:
+            section("Stable waiting area")
+            area = shared_rooms[0]
+            area_cap = area["capacity"]
+            made = {}          # W1.. -> triage record id
+            placed = {}        # W1.. -> allocation (dict)
+
+            def make(key, complaint, severity, token):
+                status, body, ms = call("nurse", "POST", "/triage",
+                                        json={**vitals(age=30, chief_complaint=complaint),
+                                              "patient_code": f"{run}-{key}", "token_number": token})
+                if status != 201:
+                    check(f"{key} saved", False, ms, f"status {status}, {body}")
+                    return None
+                made[key] = body["record"]["id"]
+                status, body, ms = call("doctor", "PATCH", f"/triage/{made[key]}/review",
+                                        json={"final_severity": severity, "override_reason": "e2e test"})
+                placed[key] = (body or {}).get("allocation") or {}
+                return ms
+
+            def area_state():
+                status, rooms_now, _ = call("charge", "GET", "/rooms")
+                return next(r for r in rooms_now if r["id"] == area["id"])
+
+            # Shrink the area to the patients already in it plus two, so three patients are enough to fill it
+            start = area_state().get("occupants", 0)
+            supabase.table("room").update({"capacity": start + 2}).eq("id", area["id"]).execute()
+
+            ms = make("W1", "mild headache", "stable", 9101)
+            check("W1 (Stable) is placed in the waiting area", placed["W1"].get("room_id") == area["id"], ms,
+                  str(placed["W1"].get("room_id")))
+            ms = make("W2", "mild headache", "stable", 9102)
+            check("W2 (Stable) is placed in the waiting area", placed["W2"].get("room_id") == area["id"], ms,
+                  str(placed["W2"].get("room_id")))
+            state = area_state()
+            check("The waiting area now shows it is full", state["occupants"] == start + 2 and state["status"] == "occupied"
+                  and state["free_spots"] == 0, None, str(state))
+            ms = make("W3", "mild headache", "stable", 9103)
+            w3_room = placed["W3"].get("room_id")
+            check("W3 (Stable) is not squeezed into the full area", w3_room != area["id"], ms, str(w3_room))
+            check("W3 goes to a treatment room instead (or waits for one)",
+                  w3_room is None or (w3_room not in shared_ids), None, str(w3_room))
+
+            ms = make("W4", "cough", "urgent", 9104)
+            w4 = placed["W4"]
+            check("W4 (Urgent) was never put in the waiting area", w4.get("room_id") not in shared_ids, ms, str(w4.get("room_id")))
+            if w4.get("id"):
+                status, _, ms = call("charge", "PATCH", f"/allocation/{w4['id']}/decide",
+                                     json={"decision": "modified", "new_room_id": area["id"]})
+                check("An Urgent patient cannot be moved into the waiting area (400)", status == 400, ms, f"got {status}")
+
+            if placed["W1"].get("id"):
+                status, _, ms = call("charge", "PATCH", f"/allocation/{placed['W1']['id']}/decide", json={"decision": "confirmed"})
+                check("Confirming a place in the waiting area works", status == 200, ms, f"got {status}")
+                check("Confirming does not change how many are waiting", area_state()["occupants"] == start + 2, None)
+                status, _, ms = call("charge", "PATCH", f"/triage/{made['W1']}/outcome", json={"outcome": "discharged"})
+                state = area_state()
+                check("Discharging W1 frees one place", status == 200 and state["occupants"] == start + 1
+                      and state["status"] == "free", ms, str(state))
+
+            if placed["W3"].get("id") and w3_room is not None:
+                status, body, ms = call("charge", "PATCH", f"/allocation/{placed['W3']['id']}/decide",
+                                        json={"decision": "modified", "new_room_id": area["id"]})
+                check("W3 can be moved into the area once a place is free", status == 200
+                      and body["allocation"]["room_id"] == area["id"], ms, f"status {status}, {body}")
+                if status == 200:
+                    check("W3's old treatment room is free again",
+                          room_map()[0][w3_room]["status"] == "free", None)
+
+            ms = make("W5", "mild headache", "stable", 9105)
+            if placed["W5"].get("id"):
+                status, _, ms = call("charge", "PATCH", f"/allocation/{placed['W5']['id']}/decide",
+                                     json={"decision": "modified", "new_room_id": area["id"]})
+                check("Moving a patient into a full waiting area is refused (409)", status in (409, 400), ms, f"got {status}")
+
+            for key in made:
+                call("charge", "PATCH", f"/triage/{made[key]}/outcome", json={"outcome": "discharged"})
+            state = area_state()
+            check("After every outcome the waiting area is back to where it started",
+                  state["occupants"] == start, None, str(state))
+            supabase.table("room").update({"capacity": area_cap}).eq("id", area["id"]).execute()
+
         section("Department full: waiting list")
+        # Pretend the waiting area is full too: make it a one-place room that is taken
+        for r in shared_rooms:
+            supabase.table("room").update({"capacity": 1, "status": "occupied"}).eq("id", r["id"]).execute()
         taken = supabase.table("room").update({"status": "occupied"}).eq("status", "free").execute().data
-        taken_ids = [r["id"] for r in taken]
+        # Stable patients only use general rooms, so that is the kind of room to free
+        taken_ids = [r["id"] for r in taken if r["room_type"] == "general" and r["id"] not in shared_ids]
         data, expected = (vitals(age=22, injury=2, pain=1, nrs_pain=3, chief_complaint="ankle sprain"), None)
         status, body, ms = call("nurse", "POST", "/triage", json={**data, "patient_code": f"{run}-T5", "token_number": 9005})
         rec["T5"] = body["record"]["id"] if status == 201 else None
@@ -277,6 +372,8 @@ def main(argv):
             check("Outcome discharged (T5)", status == 200, ms, f"got {status}")
     finally:
         # Leave the department tidy, whatever happened above
+        for r in shared_rooms:
+            supabase.table("room").update({"capacity": r["capacity"], "status": "free"}).eq("id", r["id"]).execute()
         if "--no-reset" not in argv:
             supabase.table("room").update({"status": "free"}).neq("status", "free").execute()
 

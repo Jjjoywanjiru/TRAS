@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../api';
+import { isShared } from '../rooms';
 
 const REFRESH_MS = 5000;
 const STATE_TEXT = { free: 'Free', reserved: 'Reserved, awaiting confirmation', occupied: 'Occupied' };
@@ -37,7 +38,11 @@ export default function OperationsBoard() {
   const patientInRoom = {};
   allocations.forEach((a) => { patientInRoom[a.room_id] = a; });
 
-  const freeCount = rooms.filter((r) => r.status === 'free').length;
+  const singles = rooms.filter((r) => !isShared(r));
+  const areas = rooms.filter(isShared);                       // the Stable waiting area
+  const placesTaken = areas.reduce((n, r) => n + (r.occupants || 0), 0);
+  const placesTotal = areas.reduce((n, r) => n + r.capacity, 0);
+  const freeCount = singles.filter((r) => r.status === 'free').length;
   const criticalWaiting = queue.filter((q) => q.predicted_severity === 'critical').length;
   const longestWait = queue.length ? Math.max(...queue.map((q) => minutesSince(q.created_at))) : 0;
 
@@ -60,12 +65,15 @@ export default function OperationsBoard() {
         <div className={criticalWaiting ? 'stat alert' : 'stat'}><div className="num">{criticalWaiting}</div><div className="cap">Critical, waiting</div></div>
         <div className="stat"><div className="num">{longestWait}<span className="muted" style={{ fontSize: '1rem' }}> min</span></div><div className="cap">Longest wait</div></div>
         <div className={awaiting.length ? 'stat alert' : 'stat'}><div className="num">{awaiting.length}</div><div className="cap">Waiting for a room</div></div>
-        <div className="stat"><div className="num">{freeCount}<span className="muted" style={{ fontSize: '1rem' }}> of {rooms.length}</span></div><div className="cap">Rooms free</div></div>
+        <div className="stat"><div className="num">{freeCount}<span className="muted" style={{ fontSize: '1rem' }}> of {singles.length}</span></div><div className="cap">Rooms free</div></div>
+        {areas.length > 0 && (
+          <div className="stat"><div className="num">{placesTaken}<span className="muted" style={{ fontSize: '1rem' }}> of {placesTotal}</span></div><div className="cap">Waiting area places taken</div></div>
+        )}
       </div>
 
       <h2 className="section-title" style={{ marginTop: 0 }}>Rooms</h2>
       <div className="bay-grid">
-        {rooms.map((room) => {
+        {singles.map((room) => {
           const alloc = patientInRoom[room.id];
           const sev = alloc?.triage_record?.final_severity;
           return (
@@ -83,6 +91,31 @@ export default function OperationsBoard() {
           );
         })}
       </div>
+
+      {areas.map((area) => {
+        const here = allocations.filter((a) => a.room_id === area.id);
+        const seats = Array.from({ length: area.capacity }, (_, i) => here[i] || null);
+        return (
+          <section key={area.id} className="area" aria-label={area.name}>
+            <div className="area-head">
+              <h2>{area.name}</h2>
+              <span className={area.free_spots === 0 ? 'area-count full' : 'area-count'}>
+                {area.occupants} of {area.capacity} places taken
+              </span>
+            </div>
+            <div className="seats">
+              {seats.map((a, i) => (a ? (
+                <div key={a.id} className={a.decision === 'pending' ? 'seat taken pending' : 'seat taken'}>
+                  {a.triage_record?.patient?.patient_code}
+                  <span className="muted">{a.decision === 'pending' ? 'awaiting approval' : 'confirmed'}</span>
+                </div>
+              ) : (
+                <div key={`free${i}`} className="seat">free</div>
+              )))}
+            </div>
+          </section>
+        );
+      })}
 
       <h2 className="section-title">Waiting for a doctor</h2>
       {queue.length === 0 ? (

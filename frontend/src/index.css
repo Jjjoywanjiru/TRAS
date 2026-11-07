@@ -232,3 +232,21 @@ input:focus, select:focus { border-color: var(--focus); }
 .field label.check { display: flex; align-items: center; gap: 10px; font-weight: 500; min-height: 44px; cursor: pointer; }
 .field label.check input { width: 22px; height: 22px; min-height: 0; margin: 0; flex: none; }
 @media (min-width: 761px) { .check-field { grid-column: 2; } }
+
+/* Stable waiting area (shared room) */
+.area { background: var(--surface); border: 1px solid var(--line); border-top: 6px solid var(--stable); border-radius: var(--radius); padding: 14px 16px; margin-top: 16px; }
+.area-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.area-head h2 { margin: 0; }
+.area-count { font-weight: 600; color: var(--stable-ink); }
+.area-count.full { color: var(--critical-ink); }
+.seats { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.seat { border: 1px dashed var(--line); border-radius: var(--radius); padding: 8px 10px; min-height: 52px; color: var(--ink-soft); display: flex; flex-direction: column; justify-content: center; }
+.seat.taken { border: 1px solid var(--stable); background: var(--stable-bg); color: var(--ink); font-weight: 600; }
+.seat.taken.pending { border-color: var(--urgent); background: var(--urgent-bg); }
+.seat .muted { font-weight: 400; font-size: 0.8rem; }
+
+/* One compact row per patient in the Stable waiting area */
+.wa-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--line); border-left: 6px solid var(--stable); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 8px; }
+.wa-row.pending { border-left-color: var(--urgent); }
+.wa-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wa-actions .picker { margin-top: 0; }

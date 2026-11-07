@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../api';
+import { isShared } from '../rooms';
 
 const POLL_MS = 8000;
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
@@ -60,7 +61,13 @@ export default function RoomManagement() {
   if (loading) return <div className="page">Loading rooms...</div>;
 
   const { rooms, awaiting, allocations } = board;
-  const freeRooms = rooms.filter((r) => r.status === 'free');
+  const areas = rooms.filter(isShared);                                   // the Stable waiting area
+  const freeRooms = rooms.filter((r) => !isShared(r) && r.status === 'free');
+
+  // Rooms this patient can be moved to. Only Stable patients can use the waiting area.
+  const roomOptions = (alloc) => rooms.filter((r) =>
+    r.id !== alloc.room_id && r.status === 'free'
+    && (!isShared(r) || alloc.triage_record?.final_severity === 'stable'));
 
   const roomPicker = (alloc, placeholder) => (
     <div className="picker">
@@ -70,7 +77,11 @@ export default function RoomManagement() {
         onChange={(e) => setChosenRoom({ ...chosenRoom, [alloc.id]: e.target.value })}
       >
         <option value="">{placeholder}</option>
-        {freeRooms.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.room_type})</option>)}
+        {roomOptions(alloc).map((r) => (
+          <option key={r.id} value={r.id}>
+            {isShared(r) ? `${r.name} (${r.free_spots} places free)` : `${r.name} (${r.room_type})`}
+          </option>
+        ))}
       </select>
       <button
         className="btn"
@@ -89,6 +100,7 @@ export default function RoomManagement() {
         <p>
           {freeRooms.length} free {freeRooms.length === 1 ? 'room' : 'rooms'}
           {freeRooms.length > 0 && <>: {freeRooms.map((r) => r.name).join(', ')}</>}
+          {areas.map((a) => <span key={a.id}>. {a.name}: {a.free_spots} of {a.capacity} places free</span>)}
         </p>
       </div>
 
@@ -116,14 +128,17 @@ export default function RoomManagement() {
         <p className="muted">No patients are in rooms. Rooms appear here when a doctor confirms a patient.</p>
       ) : (
         <div className="alloc-grid">
-          {allocations.map((alloc) => {
+          {allocations.filter((a) => !isShared(a.room)).map((alloc) => {
             const busy = busyKey === `a${alloc.id}`;
             const pending = alloc.decision === 'pending';
             const sev = alloc.triage_record?.final_severity;
             return (
               <article key={alloc.id} className={pending ? 'alloc pending' : 'alloc'}>
                 <h3>
-                  {alloc.room?.name} <span className="muted" style={{ fontWeight: 400 }}>({alloc.room?.room_type})</span>
+                  {alloc.room?.name}{' '}
+                  <span className="muted" style={{ fontWeight: 400 }}>
+                    ({isShared(alloc.room) ? 'shared area' : alloc.room?.room_type})
+                  </span>
                 </h3>
                 <dl>
                   <dt>Patient</dt>
@@ -161,6 +176,47 @@ export default function RoomManagement() {
           })}
         </div>
       )}
+
+      {areas.map((area) => {
+        const here = allocations.filter((a) => a.room_id === area.id);
+        if (here.length === 0) return null;
+        return (
+          <section key={area.id} style={{ marginTop: '28px' }}>
+            <h2 style={{ marginBottom: '12px' }}>
+              {area.name} <span className="muted" style={{ fontWeight: 400 }}>({area.occupants} of {area.capacity} places taken)</span>
+            </h2>
+            {here.map((alloc) => {
+              const busy = busyKey === `a${alloc.id}`;
+              const pending = alloc.decision === 'pending';
+              const sev = alloc.triage_record?.final_severity;
+              return (
+                <div key={alloc.id} className={pending ? 'wa-row pending' : 'wa-row'}>
+                  <span className="wa-who">
+                    <strong>{alloc.triage_record?.patient?.patient_code}</strong>{' '}
+                    <span className={`tier tier-${sev}`}>{cap(sev)}</span>{' '}
+                    <span className="muted">{pending ? 'waiting for your decision' : 'confirmed'}</span>
+                  </span>
+                  <span className="wa-actions">
+                    {pending ? (
+                      <>
+                        <button className="btn btn-stable btn-small" disabled={busy} onClick={() => decide(alloc, 'confirmed')}>Confirm</button>
+                        <button className="btn btn-danger-outline btn-small" disabled={busy} onClick={() => decide(alloc, 'rejected')}>Reject</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="btn btn-primary btn-small" disabled={busy} onClick={() => outcome(alloc, 'admitted')}>Admit</button>
+                        <button className="btn btn-small" disabled={busy} onClick={() => outcome(alloc, 'discharged')}>Discharge</button>
+                        <button className="btn btn-small" disabled={busy} onClick={() => outcome(alloc, 'transferred')}>Transfer</button>
+                      </>
+                    )}
+                    {roomPicker(alloc, 'Move to a room')}
+                  </span>
+                </div>
+              );
+            })}
+          </section>
+        );
+      })}
     </div>
   );
 }
