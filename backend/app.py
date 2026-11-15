@@ -2,9 +2,11 @@
 import random
 import sys
 import time
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+
 
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
@@ -149,7 +151,7 @@ def recommend_room(triage_record_id: int, severity: str, exclude_room_ids=(), au
     Critical: resus, then observation, then general (single rooms only).
     Urgent:   observation, then general, then resus (single rooms only).
     Stable:   the shared Stable waiting area while it has space, then a general room
-              (see STABLE_CAN_USE_TREATMENT_ROOMS). Only Stable patients use the shared area.
+               Only Stable patients use the shared area.
 
     Normal case: a single room is held as 'reserved' and a 'pending' allocation is
     created for the Nurse in Charge to confirm, modify or reject.
@@ -196,8 +198,17 @@ def recommend_room(triage_record_id: int, severity: str, exclude_room_ids=(), au
 # ---------------------------------------------------------------------------
 # Data readers (shared by the single-purpose endpoints and /board)
 # ---------------------------------------------------------------------------
+def _room_sort_key(room):
+    # Natural order: "Treatment 2" comes before "Treatment 10"
+    parts = re.split(r"(\d+)", room["name"])
+    return [int(p) if p.isdigit() else p.lower() for p in parts]
+
+
 def _rooms():
-    rooms = supabase.table("room").select("*").order("id").execute().data
+    rooms = sorted(
+        supabase.table("room").select("*").execute().data,
+        key=_room_sort_key,
+    )
     shared = [r for r in rooms if _is_shared(r)]
     if shared:
         counts = _occupants()
