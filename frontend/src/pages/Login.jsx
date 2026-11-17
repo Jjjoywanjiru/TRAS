@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth, HOME_FOR_ROLE } from '../authState';
+import { DEMO_ACCOUNTS } from '../demoAccounts';
 
 export default function Login() {
   const { signIn, signOut, retryProfile, profile, profileError, session, loading } = useAuth();
@@ -40,6 +41,7 @@ export default function Login() {
         <h1>Sign in to TRAS</h1>
         <p>Use the account your administrator gave you.</p>
       </div>
+      <div className="login-grid">
       <form className="panel" onSubmit={handleSubmit}>
         {error && <div className="notice err">{error}</div>}
         <div className="field">
@@ -53,7 +55,33 @@ export default function Login() {
         <button type="submit" className="btn btn-primary" disabled={busy}>
           {busy ? 'Signing in...' : 'Sign in'}
         </button>
+        <p className="forgot">Forgot your password? See your administrator.</p>
       </form>
+
+      {DEMO_ACCOUNTS.length > 0 && (
+        <section className="demo" aria-label="Try the demo">
+          <h2>Try the demo</h2>
+          <p className="muted">
+            Demonstration only. All patients are made-up. Do not enter real patient information.
+            Choose a role to fill in the form, then press Sign in.
+          </p>
+          <ul className="demo-list">
+            {DEMO_ACCOUNTS.map((a) => (
+              <li key={a.email}>
+                <div>
+                  <strong>{a.role}</strong>
+                  <div className="muted">{a.note}</div>
+                  <div className="demo-cred">{a.email} / {a.password}</div>
+                </div>
+                <button type="button" className="btn" onClick={() => { setEmail(a.email); setPassword(a.password); }}>
+                  Use
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      </div>
     </div>
   );
 }

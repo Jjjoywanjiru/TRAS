@@ -1,11 +1,12 @@
 import axios from 'axios';
 import { supabase } from './supabaseClient';
 
-export const API_URL = 'http://127.0.0.1:5000';
+// On your computer this is the local server; when deployed, set VITE_API_URL to the live backend address
+export const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
 
 // An axios instance that attaches the signed-in user's token to every request,
 // so the backend knows who is calling.
-const api = axios.create({ baseURL: API_URL, timeout: 20000 }); // give up after 20 s instead of loading forever
+const api = axios.create({ baseURL: API_URL, timeout: 60000 }); // 60 s: a free host can take about a minute to wake up
 
 api.interceptors.request.use(async (config) => {
   const { data } = await supabase.auth.getSession();

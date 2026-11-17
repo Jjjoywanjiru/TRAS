@@ -28,14 +28,15 @@ function NavBar() {
     <header className="topbar">
       <div className="brand">
         <strong>TRAS</strong>
-        <span>Emergency triage</span>
       </div>
-      {role === 'triage_nurse' && <NavLink to="/triage" className={tabClass}>Triage</NavLink>}
-      {role === 'doctor' && <NavLink to="/doctor" className={tabClass}>Doctor</NavLink>}
-      {role === 'nurse_in_charge' && <NavLink to="/rooms" className={tabClass}>Rooms</NavLink>}
-      <NavLink to="/dashboard" className={tabClass}>Board</NavLink>
+      <nav className="topnav" aria-label="Main">
+        {role === 'triage_nurse' && <NavLink to="/triage" className={tabClass}>Triage Entry</NavLink>}
+        {role === 'doctor' && <NavLink to="/doctor" className={tabClass}>Doctor Queue</NavLink>}
+        <NavLink to="/dashboard" className={tabClass}>Operations Board</NavLink>
+        {role === 'nurse_in_charge' && <NavLink to="/rooms" className={tabClass}>Room Management</NavLink>}
+      </nav>
       <div className="who">
-        <span>{profile.full_name}</span>
+        <span className="name">{profile.full_name}</span>
         <span className="role">{role.replace(/_/g, ' ')}</span>
         <button className="btn btn-onchrome" onClick={signOut}>Sign out</button>
       </div>
