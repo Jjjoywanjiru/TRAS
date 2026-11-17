@@ -1,0 +1,12 @@
+# Packages the TRAS backend needs on the server.
+# If the deploy fails with "No module named X", add X here and push again.
+Flask
+flask-cors
+gunicorn
+httpx
+python-dotenv
+supabase
+pandas
+numpy
+xgboost
+scikit-learn

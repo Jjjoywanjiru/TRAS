@@ -208,7 +208,7 @@ input:focus, select:focus { border-color: var(--focus); }
 .updated { font-size: 0.85rem; color: var(--ink-soft); }
 .head-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 
-.login-wrap { max-width: 900px; margin: 0 auto; padding: 40px 16px; min-height: 80vh; display: flex; flex-direction: column; justify-content: center; }
+.login-wrap { max-width: 480px; margin: 0 auto; padding: 40px 16px; }
 .login-wrap .page-head { text-align: center; margin-bottom: 20px; }
 .login-wrap .forgot { margin-top: 16px; text-align: center; font-size: 0.88rem; color: var(--ink-soft); }
 .login-wrap .panel { padding: 24px; }
@@ -296,12 +296,11 @@ input:focus, select:focus { border-color: var(--focus); }
 .demo-list li > div { min-width: 0; }
 
 /* Sign-in form and demo panel side by side; stacked on a phone */
-.login-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.login-grid { display: flex; flex-direction: column; gap: 20px; }
 .login-grid .demo { margin-top: 0; }
-@media (max-width: 760px) { .login-grid { grid-template-columns: 1fr; } .login-wrap { min-height: 0; justify-content: flex-start; } }
+@media (max-width: 760px) {  .login-wrap { min-height: 0; justify-content: flex-start; } }
 
-.login-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
-@media (max-width: 760px) { .login-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {  }
 
 /* ---------- Phone layout fixes ---------- */
 @media (max-width: 900px) {

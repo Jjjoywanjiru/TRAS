@@ -3,6 +3,7 @@ import random
 import sys
 import time
 import re
+import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,8 +38,10 @@ STABLE_CAN_USE_TREATMENT_ROOMS = True
 
 SLOW_MS = 300   # requests slower than this are printed in the Flask terminal
 
+
+
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=[o.strip() for o in os.environ.get("FRONTEND_URL", "*").split(",") if o.strip()])
 
 
 @app.before_request
@@ -615,6 +618,7 @@ def recommend_for_waiting(record_id):
         return jsonify(allocation=allocation, message=f"{allocation['room']['name']} recommended."), 200
     except Exception as e:
         return jsonify(error=str(e)), 500
+
 
 
 if __name__ == "__main__":
