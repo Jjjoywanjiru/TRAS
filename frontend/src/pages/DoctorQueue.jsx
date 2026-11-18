@@ -8,6 +8,15 @@ const ICON = { critical: '!', urgent: '▲', stable: '✓' };
 const CONSCIOUS = { 1: 'Alert', 2: 'Voice', 3: 'Pain', 4: 'Unresponsive' };
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
 
+
+// Makes the model's raw feature names readable for a clinician
+const friendly = (text) =>
+  text
+    .replace(/complaint group is not '([^']+)'/i, "Complaint is not in the '$1' group")
+    .replace(/complaint group is '([^']+)'/i, "Complaint is in the '$1' group")
+    .replace(/NRS_pain/g, 'Pain score');
+
+
 function Tier({ tier }) {
   return <span className={`tier tier-${tier}`}>{ICON[tier]} {cap(tier)}</span>;
 }
@@ -172,26 +181,57 @@ export default function DoctorQueue() {
                 </div>
               )}
 
-              <div className="predicted">
+                            <div className="predicted">
                 Predicted severity: <strong>{ICON[predicted]} {cap(predicted)}</strong>
-                {record.top_features?.confidence != null && <span className="muted"> (model confidence {Math.round(record.top_features.confidence * 100)}%)</span>}
+                {record.top_features?.floor_applied ? (
+                  <span className="muted">
+                    {' '}(raised by a safety rule; the model alone said {cap(record.top_features.model_tier)}
+                    {record.top_features?.confidence != null &&
+                      `, confidence ${Math.round(record.top_features.confidence * 100)}%`})
+                  </span>
+                ) : (
+                  record.top_features?.confidence != null && (
+                    <span className="muted"> (model confidence {Math.round(record.top_features.confidence * 100)}%)</span>
+                  )
+                )}
               </div>
 
-              {reasons && (
-                <div className="why">
-                  <strong>Why this prediction</strong>
-                  <ul>
-                    {reasons.map((r, i) => (
-                      <li key={i}>
-                        {r.text}{' '}
-                        <span className={r.direction === 'toward' ? 'up' : 'down'}>
-                          ({r.direction === 'toward' ? 'raises' : 'lowers'} the predicted severity)
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              {reasons && (() => {
+                const safety = reasons.filter((r) => /^safety rule/i.test(r.text));
+                const model = reasons.filter((r) => !/^safety rule/i.test(r.text));
+                return (
+                  <div className="why">
+                    {safety.length > 0 && (
+                      <>
+                        <strong>Safety rules triggered</strong>
+                        <ul>
+                          {safety.map((r, i) => (
+                            <li key={i}>{r.text.replace(/^safety rule:\s*/i, '')}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                    {model.length > 0 && (
+                      <>
+                        <strong>Model factors</strong>
+                        <p className="muted" style={{ margin: '2px 0 6px', fontSize: 13 }}>
+                          Statistical patterns learned from past cases, not clinical rules.
+                        </p>
+                        <ul>
+                          {model.map((r, i) => (
+                            <li key={i}>
+                              {friendly(r.text)}{' '}
+                              <span className={r.direction === 'toward' ? 'up' : 'down'}>
+                                ({r.direction === 'toward' ? 'raises' : 'lowers'} the predicted severity)
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="review-actions">
                 <button className="btn btn-primary" disabled={busy} onClick={() => submit(record, predicted, null)}>
