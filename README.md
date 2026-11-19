@@ -189,3 +189,7 @@ Only anonymised, public or synthetic data is used. No datasets, keys or credenti
 ## Acknowledgements
 
 Thanks to Dr. Fredrick Ogore for supervision, and to the emergency department nurse whose description of the real workflow shaped the design.
+
+## License
+
+The code in this repository is released under the [MIT License](LICENSE). The KTAS dataset is not covered by this license and remains under its original terms.
