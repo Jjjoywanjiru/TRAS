@@ -167,7 +167,7 @@ python test_safety_rules.py   # safety floor checks (no database needed)
 - Critical recall is 69.4%, so some Critical patients are still missed. The doctor must always review.
 - The safety thresholds are standard adult values and have not been reviewed by a clinician. They do not apply to children.
 - The dashboard refreshes by polling every few seconds, not in real time.
-- No manual fallback if the model service is down, and no database row-level security policies yet.
+- No manual fallback if the model service is down
 - Free hosting sleeps when idle, so the first request can be slow.
 
 ## Future work
