@@ -2,7 +2,7 @@
 
 TRAS is an advisory web application for an emergency department (ED). It predicts how severe a patient's condition is from their vitals and chief complaint, explains the prediction, and recommends a room. Clinicians stay in control: a doctor confirms or overrides every severity, and the nurse in charge confirms, modifies or rejects every room.
 
-Software Enginerring project 1, SWE3090A, Fall 2026, United States International University-Africa (USIU-Africa).
+Software Engineering project 1, SWE3090A, Fall 2026, United States International University-Africa (USIU-Africa).
 Author: Joy Wanjiru Ndung'u. Supervisor: Dr. Fredrick Ogore.
 
 **Live demo: https://t-ras.onrender.com**
