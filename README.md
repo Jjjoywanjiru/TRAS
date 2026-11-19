@@ -180,7 +180,7 @@ python test_safety_rules.py   # safety floor checks (no database needed)
 
 ## Design
 
-Figma designs: [paste link here]
+Figma designs: [https://www.figma.com/design/xVi8ed5umQL1CQdqZqWWsG/TRAS?node-id=0-1&p=f&t=vgv8xLCHda88f85d-0]
 
 ## Data
 
