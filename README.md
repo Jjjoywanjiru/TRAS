@@ -2,7 +2,7 @@
 
 TRAS is an advisory web application for an emergency department (ED). It predicts how severe a patient's condition is from their vitals and chief complaint, explains the prediction, and recommends a room. Clinicians stay in control: a doctor confirms or overrides every severity, and the nurse in charge confirms, modifies or rejects every room.
 
-Final-year project, SWE3090A, Fall 2026, United States International University-Africa (USIU-Africa).
+Software Enginerring project 1, SWE3090A, Fall 2026, United States International University-Africa (USIU-Africa).
 Author: Joy Wanjiru Ndung'u. Supervisor: Dr. Fredrick Ogore.
 
 **Live demo: https://t-ras.onrender.com**
@@ -183,7 +183,7 @@ python test_safety_rules.py   # safety floor checks (no database needed)
 Figma designs: [https://www.figma.com/design/xVi8ed5umQL1CQdqZqWWsG/TRAS?node-id=0-1&p=f&t=vgv8xLCHda88f85d-0]
 
 ## Data
-
+Used a kaggle dataset [https://www.kaggle.com/datasets/ilkeryildiz/emergency-service-triage-application] 
 Only anonymised, public or synthetic data is used. No datasets, keys or credentials of real patients are stored in this repository.
 
 ## Acknowledgements
